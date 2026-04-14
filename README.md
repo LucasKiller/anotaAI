@@ -135,14 +135,15 @@ set PYTHONPATH=apps\worker_python && python -m app.main
 ## Observações de implementação
 
 - Áudios vão para MinIO; metadados ficam no Postgres.
-- O pipeline do worker usa `faster-whisper` para transcrição quando disponível (com fallback para stub em caso de falha).
+- O pipeline do worker usa `faster-whisper` para transcrição real quando `TRANSCRIPTION_PROVIDER=local_whisper`.
+- Para transcrição local funcionar, `ffmpeg` precisa estar instalado no host/container do worker.
 - Os pontos de extensão para Whisper/Ollama estão separados em `apps/worker_python/app/jobs/*`.
 - A API já está organizada com `services`, `repositories` e `integrations`.
 
 ## Próximos passos recomendados
 
-1. Trocar `transcribe_audio_stub` por Whisper real no worker.
+1. Melhorar estratégia de chunking e sumarização para textos longos.
 2. Adicionar embeddings reais + índice vetorial (`HNSW`).
 3. Implementar presigned upload para arquivos grandes.
 4. Substituir `create_all` por migrations Alembic versionadas.
-5. Implementar upload de áudio no frontend (multipart/presigned).
+5. Evoluir renderização visual do mapa mental no frontend.

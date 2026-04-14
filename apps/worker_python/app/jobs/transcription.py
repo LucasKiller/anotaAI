@@ -16,6 +16,10 @@ class TranscriptionResult:
     segments: list[dict]
 
 
+class TranscriptionError(RuntimeError):
+    """Raised when real transcription is required but cannot be produced."""
+
+
 def transcribe_audio_file(
     *,
     file_path: str,
@@ -28,7 +32,12 @@ def transcribe_audio_file(
 
     try:
         from faster_whisper import WhisperModel
+    except Exception as exc:
+        raise TranscriptionError(
+            'Nao foi possivel importar faster-whisper. Instale as dependencias do worker.'
+        ) from exc
 
+    try:
         model = WhisperModel(
             settings.whisper_model_size,
             device=settings.whisper_device,
@@ -67,16 +76,20 @@ def transcribe_audio_file(
 
         full_text = ' '.join(text_parts).strip()
         if not full_text:
-            return _stub_result(title=title, object_key=object_key)
+            raise TranscriptionError('Whisper nao retornou texto para o audio enviado.')
 
         return TranscriptionResult(
             full_text=full_text,
             model_name=f'faster-whisper:{settings.whisper_model_size}',
             segments=segments,
         )
-    except Exception:
-        logger.exception('Falling back to stub transcription for file=%s', file_path)
-        return _stub_result(title=title, object_key=object_key)
+    except TranscriptionError:
+        raise
+    except Exception as exc:
+        logger.exception('Whisper transcription failed for file=%s', file_path)
+        raise TranscriptionError(
+            'Falha ao transcrever com Whisper local. Verifique ffmpeg e o formato do audio.'
+        ) from exc
 
 
 def _stub_result(*, title: str, object_key: str | None) -> TranscriptionResult:

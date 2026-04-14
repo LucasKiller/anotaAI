@@ -59,7 +59,8 @@ class _DashboardPageState extends State<DashboardPage> {
     }
 
     try {
-      await _recordingsController.createRecording(accessToken: token, title: title);
+      await _recordingsController.createRecording(
+          accessToken: token, title: title);
       _newRecordingController.clear();
     } on ApiException catch (error) {
       _showMessage(error.message);
@@ -73,7 +74,8 @@ class _DashboardPageState extends State<DashboardPage> {
     }
 
     try {
-      await _recordingsController.selectRecording(accessToken: token, recordingId: recording.id);
+      await _recordingsController.selectRecording(
+          accessToken: token, recordingId: recording.id);
     } on ApiException catch (error) {
       _showMessage(error.message);
     }
@@ -87,8 +89,13 @@ class _DashboardPageState extends State<DashboardPage> {
     }
 
     try {
-      await _recordingsController.startProcessing(accessToken: token, recordingId: selected.id);
-      _showMessage('Pipeline de processamento iniciado.');
+      await _recordingsController.startProcessing(
+        accessToken: token,
+        recordingId: selected.id,
+        waitForCompletion: true,
+      );
+      _showMessage(
+          'Processamento concluido. Transcricao, resumo e mapa mental atualizados.');
     } on ApiException catch (error) {
       _showMessage(error.message);
     }
@@ -123,8 +130,10 @@ class _DashboardPageState extends State<DashboardPage> {
         recordingId: selected.id,
         fileName: file.name,
         bytes: bytes,
+        processAfterUpload: true,
+        waitForCompletion: true,
       );
-      _showMessage('Audio enviado com sucesso.');
+      _showMessage('Audio enviado e processado com sucesso.');
     } on ApiException catch (error) {
       _showMessage(error.message);
     } catch (_) {
@@ -140,7 +149,8 @@ class _DashboardPageState extends State<DashboardPage> {
     }
 
     try {
-      await _recordingsController.reloadDetails(accessToken: token, recordingId: selected.id);
+      await _recordingsController.reloadDetails(
+          accessToken: token, recordingId: selected.id);
     } on ApiException catch (error) {
       _showMessage(error.message);
     }
@@ -175,7 +185,8 @@ class _DashboardPageState extends State<DashboardPage> {
               child: const Text('Cancelar'),
             ),
             FilledButton(
-              onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+              onPressed: () =>
+                  Navigator.of(context).pop(controller.text.trim()),
               child: const Text('Salvar'),
             ),
           ],
@@ -189,7 +200,8 @@ class _DashboardPageState extends State<DashboardPage> {
     }
 
     try {
-      await widget.authController.updateProfileName(result.isEmpty ? null : result);
+      await widget.authController
+          .updateProfileName(result.isEmpty ? null : result);
       _showMessage('Nome atualizado.');
     } on ApiException catch (error) {
       _showMessage(error.message);
@@ -204,8 +216,10 @@ class _DashboardPageState extends State<DashboardPage> {
     }
 
     final titleController = TextEditingController(text: selected.title);
-    final descriptionController = TextEditingController(text: selected.description ?? '');
-    final languageController = TextEditingController(text: selected.language ?? '');
+    final descriptionController =
+        TextEditingController(text: selected.description ?? '');
+    final languageController =
+        TextEditingController(text: selected.language ?? '');
 
     final shouldSave = await showDialog<bool>(
       context: context,
@@ -299,7 +313,7 @@ class _DashboardPageState extends State<DashboardPage> {
       builder: (context) {
         return AlertDialog(
           title: const Text('Excluir gravacao'),
-          content: Text('Deseja realmente excluir \"${selected.title}\"?'),
+          content: Text('Deseja realmente excluir "${selected.title}"?'),
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
@@ -333,7 +347,8 @@ class _DashboardPageState extends State<DashboardPage> {
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -418,7 +433,9 @@ class _DashboardPageState extends State<DashboardPage> {
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
-                onPressed: _recordingsController.isListLoading ? null : _createRecording,
+                onPressed: _recordingsController.isListLoading
+                    ? null
+                    : _createRecording,
                 icon: const Icon(Icons.add),
                 label: const Text('Criar gravacao'),
               ),
@@ -441,7 +458,8 @@ class _DashboardPageState extends State<DashboardPage> {
                             return;
                           }
                           try {
-                            await _recordingsController.refreshRecordings(accessToken: token);
+                            await _recordingsController.refreshRecordings(
+                                accessToken: token);
                           } on ApiException catch (error) {
                             _showMessage(error.message);
                           }
@@ -455,12 +473,15 @@ class _DashboardPageState extends State<DashboardPage> {
               child: _recordingsController.isListLoading && recordings.isEmpty
                   ? const Center(child: CircularProgressIndicator())
                   : recordings.isEmpty
-                      ? const Center(child: Text('Nenhuma gravacao criada ainda.'))
+                      ? const Center(
+                          child: Text('Nenhuma gravacao criada ainda.'))
                       : ListView.builder(
                           itemCount: recordings.length,
                           itemBuilder: (context, index) {
                             final recording = recordings[index];
-                            final selected = _recordingsController.selected?.id == recording.id;
+                            final selected =
+                                _recordingsController.selected?.id ==
+                                    recording.id;
                             return Card(
                               color: selected ? const Color(0xFFE2F2EE) : null,
                               child: ListTile(
@@ -504,15 +525,25 @@ class _DashboardPageState extends State<DashboardPage> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: <Widget>[
-                              Text(selected.title, style: Theme.of(context).textTheme.headlineSmall),
+                              Text(selected.title,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .headlineSmall),
                               const SizedBox(height: 8),
                               Wrap(
                                 spacing: 8,
                                 runSpacing: 8,
                                 children: <Widget>[
-                                  Chip(label: Text('Status: ${selected.status}')),
-                                  Chip(label: Text('Fonte: ${selected.sourceType}')),
-                                  if (selected.language != null) Chip(label: Text('Idioma: ${selected.language}')),
+                                  Chip(
+                                      label:
+                                          Text('Status: ${selected.status}')),
+                                  Chip(
+                                      label: Text(
+                                          'Fonte: ${selected.sourceType}')),
+                                  if (selected.language != null)
+                                    Chip(
+                                        label: Text(
+                                            'Idioma: ${selected.language}')),
                                 ],
                               ),
                               const SizedBox(height: 6),
@@ -520,7 +551,8 @@ class _DashboardPageState extends State<DashboardPage> {
                                 'Criado em ${_formatDate(selected.createdAt)}',
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
-                              if (selected.description != null && selected.description!.isNotEmpty) ...<Widget>[
+                              if (selected.description != null &&
+                                  selected.description!.isNotEmpty) ...<Widget>[
                                 const SizedBox(height: 8),
                                 Text(
                                   selected.description!,

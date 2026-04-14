@@ -10,12 +10,15 @@ import '../../shared/models/recording_model.dart';
 import '../../shared/models/transcript_model.dart';
 
 class RecordingsService {
-  RecordingsService({ApiClient? apiClient}) : _apiClient = apiClient ?? ApiClient();
+  RecordingsService({ApiClient? apiClient})
+      : _apiClient = apiClient ?? ApiClient();
 
   final ApiClient _apiClient;
 
-  Future<List<RecordingModel>> listRecordings({required String accessToken}) async {
-    final response = await _apiClient.get('/recordings', accessToken: accessToken) as Map<String, dynamic>;
+  Future<List<RecordingModel>> listRecordings(
+      {required String accessToken}) async {
+    final response = await _apiClient.get('/recordings',
+        accessToken: accessToken) as Map<String, dynamic>;
     final rawItems = (response['items'] as List<dynamic>? ?? <dynamic>[])
         .cast<Map<String, dynamic>>();
     return rawItems.map(RecordingModel.fromJson).toList();
@@ -37,11 +40,21 @@ class RecordingsService {
     return RecordingModel.fromJson(response);
   }
 
+  Future<RecordingModel> getRecording({
+    required String accessToken,
+    required String recordingId,
+  }) async {
+    final response = await _apiClient.get('/recordings/$recordingId',
+        accessToken: accessToken) as Map<String, dynamic>;
+    return RecordingModel.fromJson(response);
+  }
+
   Future<void> startProcessing({
     required String accessToken,
     required String recordingId,
   }) async {
-    await _apiClient.post('/recordings/$recordingId/process', accessToken: accessToken);
+    await _apiClient.post('/recordings/$recordingId/process',
+        accessToken: accessToken);
   }
 
   Future<void> uploadAudioBytes({
@@ -99,7 +112,8 @@ class RecordingsService {
     required String accessToken,
     required String recordingId,
   }) async {
-    await _apiClient.delete('/recordings/$recordingId', accessToken: accessToken);
+    await _apiClient.delete('/recordings/$recordingId',
+        accessToken: accessToken);
   }
 
   Future<TranscriptModel?> getTranscript({
@@ -107,8 +121,9 @@ class RecordingsService {
     required String recordingId,
   }) async {
     try {
-      final response = await _apiClient.get('/recordings/$recordingId/transcript', accessToken: accessToken)
-          as Map<String, dynamic>;
+      final response = await _apiClient.get(
+          '/recordings/$recordingId/transcript',
+          accessToken: accessToken) as Map<String, dynamic>;
       return TranscriptModel.fromJson(response);
     } on ApiException catch (error) {
       if (error.statusCode == 404) {
@@ -123,8 +138,8 @@ class RecordingsService {
     required String recordingId,
   }) async {
     try {
-      final response = await _apiClient.get('/recordings/$recordingId/summary', accessToken: accessToken)
-          as Map<String, dynamic>;
+      final response = await _apiClient.get('/recordings/$recordingId/summary',
+          accessToken: accessToken) as Map<String, dynamic>;
       return ArtifactModel.fromJson(response);
     } on ApiException catch (error) {
       if (error.statusCode == 404) {
@@ -139,8 +154,8 @@ class RecordingsService {
     required String recordingId,
   }) async {
     try {
-      final response = await _apiClient.get('/recordings/$recordingId/mindmap', accessToken: accessToken)
-          as Map<String, dynamic>;
+      final response = await _apiClient.get('/recordings/$recordingId/mindmap',
+          accessToken: accessToken) as Map<String, dynamic>;
       return ArtifactModel.fromJson(response);
     } on ApiException catch (error) {
       if (error.statusCode == 404) {
@@ -154,8 +169,8 @@ class RecordingsService {
     required String accessToken,
     required String recordingId,
   }) async {
-    final response = await _apiClient.get('/recordings/$recordingId/jobs', accessToken: accessToken)
-        as Map<String, dynamic>;
+    final response = await _apiClient.get('/recordings/$recordingId/jobs',
+        accessToken: accessToken) as Map<String, dynamic>;
     final rawItems = (response['items'] as List<dynamic>? ?? <dynamic>[])
         .cast<Map<String, dynamic>>();
     return rawItems.map(JobModel.fromJson).toList();
