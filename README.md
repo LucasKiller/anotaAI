@@ -114,6 +114,14 @@ set PYTHONPATH=apps\worker_python && python -m app.main
 - `GET /v1/recordings/{id}/mindmap`
 - chat por sessão em `/v1/chat/sessions/...`
 
+## Endpoints de edição já disponíveis
+
+- `PATCH /v1/me` (atualiza apenas `name`)
+- `PATCH /v1/recordings/{id}` (atualiza título/descrição/idioma)
+- `DELETE /v1/recordings/{id}`
+
+`email` e `password` não possuem endpoint de alteração nesta fase.
+
 ## Serviços no Compose
 
 - `client`: Nginx para servir `apps/client_flutter/web` (use build Flutter para produção)

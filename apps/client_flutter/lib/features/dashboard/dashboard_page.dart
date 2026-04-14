@@ -150,6 +150,185 @@ class _DashboardPageState extends State<DashboardPage> {
     await widget.authController.logout();
   }
 
+  Future<void> _editProfileName() async {
+    final current = widget.authController.currentUser;
+    if (current == null) {
+      return;
+    }
+
+    final controller = TextEditingController(text: current.name ?? '');
+    final result = await showDialog<String?>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Atualizar nome'),
+          content: TextField(
+            controller: controller,
+            decoration: const InputDecoration(
+              labelText: 'Nome',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+              child: const Text('Salvar'),
+            ),
+          ],
+        );
+      },
+    );
+    controller.dispose();
+
+    if (result == null) {
+      return;
+    }
+
+    try {
+      await widget.authController.updateProfileName(result.isEmpty ? null : result);
+      _showMessage('Nome atualizado.');
+    } on ApiException catch (error) {
+      _showMessage(error.message);
+    }
+  }
+
+  Future<void> _editSelectedRecording() async {
+    final token = widget.authController.accessToken;
+    final selected = _recordingsController.selected;
+    if (token == null || selected == null) {
+      return;
+    }
+
+    final titleController = TextEditingController(text: selected.title);
+    final descriptionController = TextEditingController(text: selected.description ?? '');
+    final languageController = TextEditingController(text: selected.language ?? '');
+
+    final shouldSave = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Editar gravacao'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                TextField(
+                  controller: titleController,
+                  decoration: const InputDecoration(
+                    labelText: 'Titulo',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: languageController,
+                  decoration: const InputDecoration(
+                    labelText: 'Idioma (opcional)',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: descriptionController,
+                  minLines: 3,
+                  maxLines: 6,
+                  decoration: const InputDecoration(
+                    labelText: 'Descricao (opcional)',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Salvar'),
+            ),
+          ],
+        );
+      },
+    );
+
+    final title = titleController.text.trim();
+    final description = descriptionController.text.trim();
+    final language = languageController.text.trim();
+    titleController.dispose();
+    descriptionController.dispose();
+    languageController.dispose();
+
+    if (shouldSave != true) {
+      return;
+    }
+    if (title.isEmpty) {
+      _showMessage('Titulo nao pode ficar vazio.');
+      return;
+    }
+
+    try {
+      await _recordingsController.updateSelectedRecording(
+        accessToken: token,
+        recordingId: selected.id,
+        title: title,
+        description: description.isEmpty ? null : description,
+        language: language.isEmpty ? null : language,
+      );
+      _showMessage('Gravacao atualizada.');
+    } on ApiException catch (error) {
+      _showMessage(error.message);
+    }
+  }
+
+  Future<void> _deleteSelectedRecording() async {
+    final token = widget.authController.accessToken;
+    final selected = _recordingsController.selected;
+    if (token == null || selected == null) {
+      return;
+    }
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Excluir gravacao'),
+          content: Text('Deseja realmente excluir \"${selected.title}\"?'),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Excluir'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirm != true) {
+      return;
+    }
+
+    try {
+      await _recordingsController.deleteSelectedRecording(
+        accessToken: token,
+        recordingId: selected.id,
+      );
+      _showMessage('Gravacao excluida.');
+    } on ApiException catch (error) {
+      _showMessage(error.message);
+    }
+  }
+
   void _showMessage(String message) {
     if (!mounted) {
       return;
@@ -170,11 +349,23 @@ class _DashboardPageState extends State<DashboardPage> {
           appBar: AppBar(
             title: const Text('AnotaAi Dashboard'),
             actions: <Widget>[
+              if (widget.authController.currentUser?.name != null)
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 12),
+                    child: Text(widget.authController.currentUser!.name!),
+                  ),
+                ),
               Center(
                 child: Padding(
                   padding: const EdgeInsets.only(right: 12),
                   child: Text(widget.authController.currentUser?.email ?? ''),
                 ),
+              ),
+              IconButton(
+                tooltip: 'Editar nome',
+                onPressed: _editProfileName,
+                icon: const Icon(Icons.person),
               ),
               IconButton(
                 tooltip: 'Sair',
@@ -329,12 +520,31 @@ class _DashboardPageState extends State<DashboardPage> {
                                 'Criado em ${_formatDate(selected.createdAt)}',
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
+                              if (selected.description != null && selected.description!.isNotEmpty) ...<Widget>[
+                                const SizedBox(height: 8),
+                                Text(
+                                  selected.description!,
+                                  style: Theme.of(context).textTheme.bodyMedium,
+                                ),
+                              ],
                             ],
                           ),
                         ),
                         const SizedBox(width: 8),
                         Column(
                           children: <Widget>[
+                            FilledButton.tonalIcon(
+                              onPressed: _editSelectedRecording,
+                              icon: const Icon(Icons.edit),
+                              label: const Text('Editar'),
+                            ),
+                            const SizedBox(height: 8),
+                            OutlinedButton.icon(
+                              onPressed: _deleteSelectedRecording,
+                              icon: const Icon(Icons.delete_outline),
+                              label: const Text('Excluir'),
+                            ),
+                            const SizedBox(height: 8),
                             FilledButton.icon(
                               onPressed: _uploadAudio,
                               icon: const Icon(Icons.upload_file),

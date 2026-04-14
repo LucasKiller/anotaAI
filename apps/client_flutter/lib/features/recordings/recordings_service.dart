@@ -75,6 +75,33 @@ class RecordingsService {
     );
   }
 
+  Future<RecordingModel> updateRecording({
+    required String accessToken,
+    required String recordingId,
+    required String title,
+    String? description,
+    String? language,
+  }) async {
+    final response = await _apiClient.patch(
+      '/recordings/$recordingId',
+      accessToken: accessToken,
+      body: {
+        'title': title,
+        'description': description,
+        'language': language,
+      },
+    ) as Map<String, dynamic>;
+
+    return RecordingModel.fromJson(response);
+  }
+
+  Future<void> deleteRecording({
+    required String accessToken,
+    required String recordingId,
+  }) async {
+    await _apiClient.delete('/recordings/$recordingId', accessToken: accessToken);
+  }
+
   Future<TranscriptModel?> getTranscript({
     required String accessToken,
     required String recordingId,

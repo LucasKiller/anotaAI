@@ -37,3 +37,7 @@ class MeResponse(BaseModel):
     name: str | None
     status: str
     created_at: datetime
+
+
+class MeUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, max_length=255)

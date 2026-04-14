@@ -1,5 +1,5 @@
 from app.schemas.artifacts import ArtifactResponse
-from app.schemas.auth import LoginRequest, LogoutRequest, MeResponse, RefreshRequest, RegisterRequest, TokenResponse
+from app.schemas.auth import LoginRequest, LogoutRequest, MeResponse, MeUpdateRequest, RefreshRequest, RegisterRequest, TokenResponse
 from app.schemas.chat import (
     ChatMessageCreate,
     ChatMessageResponse,
@@ -19,6 +19,7 @@ __all__ = [
     "LoginRequest",
     "LogoutRequest",
     "MeResponse",
+    "MeUpdateRequest",
     "RefreshRequest",
     "RegisterRequest",
     "TokenResponse",

@@ -45,16 +45,14 @@ class RecordingService:
         self,
         *,
         recording: Recording,
-        title: str | None,
-        description: str | None,
-        language: str | None,
+        update_data: dict,
     ) -> Recording:
-        if title is not None:
-            recording.title = title
-        if description is not None:
-            recording.description = description
-        if language is not None:
-            recording.language = language
+        if "title" in update_data:
+            recording.title = update_data["title"]
+        if "description" in update_data:
+            recording.description = update_data["description"]
+        if "language" in update_data:
+            recording.language = update_data["language"]
 
         self.db.add(recording)
         self.db.commit()

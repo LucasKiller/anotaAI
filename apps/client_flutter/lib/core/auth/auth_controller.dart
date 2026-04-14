@@ -107,6 +107,27 @@ class AuthController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> updateProfileName(String? name) async {
+    final token = _accessToken;
+    if (token == null) {
+      throw ApiException(message: 'Sessao expirada', statusCode: 401);
+    }
+
+    _setLoading(true);
+    _setError(null);
+    try {
+      final response = await _apiClient.patch(
+        '/me',
+        accessToken: token,
+        body: {'name': name},
+      );
+      _currentUser = AppUser.fromJson(response as Map<String, dynamic>);
+      notifyListeners();
+    } finally {
+      _setLoading(false);
+    }
+  }
+
   Future<void> _fetchCurrentUser() async {
     final token = _accessToken;
     if (token == null) {

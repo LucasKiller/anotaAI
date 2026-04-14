@@ -28,6 +28,12 @@ class UserRepository:
         user.last_login_at = datetime.now(UTC)
         self.db.add(user)
 
+    def update_name(self, user: User, name: str | None) -> User:
+        user.name = name
+        self.db.add(user)
+        self.db.flush()
+        return user
+
 
 class RefreshTokenRepository:
     def __init__(self, db: Session):

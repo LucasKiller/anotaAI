@@ -147,6 +147,63 @@ class RecordingsController extends ChangeNotifier {
     }
   }
 
+  Future<void> updateSelectedRecording({
+    required String accessToken,
+    required String recordingId,
+    required String title,
+    String? description,
+    String? language,
+  }) async {
+    _setDetailLoading(true);
+    _setError(null);
+    try {
+      await _service.updateRecording(
+        accessToken: accessToken,
+        recordingId: recordingId,
+        title: title,
+        description: description,
+        language: language,
+      );
+
+      await refreshRecordings(accessToken: accessToken);
+      await _loadDetails(accessToken: accessToken, recordingId: recordingId);
+    } on ApiException catch (error) {
+      _setError(error.message);
+      rethrow;
+    } finally {
+      _setDetailLoading(false);
+    }
+  }
+
+  Future<void> deleteSelectedRecording({
+    required String accessToken,
+    required String recordingId,
+  }) async {
+    _setDetailLoading(true);
+    _setError(null);
+    try {
+      await _service.deleteRecording(accessToken: accessToken, recordingId: recordingId);
+
+      _recordings = _recordings.where((item) => item.id != recordingId).toList();
+      _selected = null;
+      _transcript = null;
+      _summary = null;
+      _mindmap = null;
+      _jobs = <JobModel>[];
+
+      if (_recordings.isNotEmpty) {
+        _selected = _recordings.first;
+        await _loadDetails(accessToken: accessToken, recordingId: _recordings.first.id);
+      }
+      notifyListeners();
+    } on ApiException catch (error) {
+      _setError(error.message);
+      rethrow;
+    } finally {
+      _setDetailLoading(false);
+    }
+  }
+
   Future<void> reloadDetails({
     required String accessToken,
     required String recordingId,

@@ -56,11 +56,10 @@ def patch_recording(
 ) -> RecordingResponse:
     service = RecordingService(db)
     recording = service.get_for_user(recording_id=recording_id, user_id=user.id)
+    update_data = payload.model_dump(exclude_unset=True)
     updated = service.update(
         recording=recording,
-        title=payload.title,
-        description=payload.description,
-        language=payload.language,
+        update_data=update_data,
     )
     return RecordingResponse.model_validate(updated)
 
