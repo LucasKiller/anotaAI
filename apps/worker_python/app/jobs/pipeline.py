@@ -1,23 +1,28 @@
 import logging
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
+from app.integrations.storage.s3_storage import S3StorageClient
 from app.jobs.artifacts import build_mindmap_json, build_summary_markdown
 from app.jobs.chat_index import update_chat_index_stub
 from app.jobs.embeddings import build_embeddings_stub
 from app.jobs.segmentation import build_segments
-from app.jobs.transcription import transcribe_audio_stub
+from app.jobs.transcription import transcribe_audio_file
 from app.models import Artifact, ProcessingJob, Recording, RecordingFile, Transcript, TranscriptSegment
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 
 class PipelineProcessor:
     def __init__(self, db: Session):
         self.db = db
+        self.storage = S3StorageClient()
 
     def run(self, *, job_id: UUID, recording_id: UUID) -> None:
         job = self.db.get(ProcessingJob, job_id)
@@ -40,23 +45,35 @@ class PipelineProcessor:
 
         try:
             latest_file = self._latest_file(recording.id)
-            transcript_text, model_name = transcribe_audio_stub(
-                title=recording.title,
-                object_key=latest_file.object_key if latest_file else None,
+            if not latest_file:
+                raise ValueError("No audio file uploaded for this recording")
+
+            temp_file = self.storage.download_to_temp_file(
+                bucket=latest_file.bucket or settings.s3_bucket,
+                object_key=latest_file.object_key,
             )
+            try:
+                transcription = transcribe_audio_file(
+                    file_path=str(temp_file),
+                    title=recording.title,
+                    object_key=latest_file.object_key,
+                    language=recording.language,
+                )
+            finally:
+                self._safe_unlink(temp_file)
 
             transcript = self._create_transcript(
                 recording_id=recording.id,
-                full_text=transcript_text,
+                full_text=transcription.full_text,
                 language=recording.language,
-                model_name=model_name,
+                model_name=transcription.model_name,
             )
 
-            segments_payload = build_segments(transcript_text)
+            segments_payload = transcription.segments or build_segments(transcription.full_text)
             self._create_segments(transcript_id=transcript.id, segments_payload=segments_payload)
             build_embeddings_stub(segments_payload)
 
-            summary = build_summary_markdown(recording.title, transcript_text, segments_payload)
+            summary = build_summary_markdown(recording.title, transcription.full_text, segments_payload)
             mindmap = build_mindmap_json(recording.title, segments_payload)
             self._create_artifact(recording.id, artifact_type="summary", content_md=summary)
             self._create_artifact(recording.id, artifact_type="mindmap", content_json=mindmap)
@@ -82,6 +99,12 @@ class PipelineProcessor:
             self.db.rollback()
             self._mark_failed(job_id=job_id, recording_id=recording_id, error_message=str(exc))
             raise
+
+    def _safe_unlink(self, path: Path) -> None:
+        try:
+            path.unlink(missing_ok=True)
+        except Exception:
+            logger.warning("Could not delete temp file: %s", path)
 
     def _latest_file(self, recording_id: UUID) -> RecordingFile | None:
         stmt = (

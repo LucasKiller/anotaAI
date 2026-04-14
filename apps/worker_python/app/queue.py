@@ -18,7 +18,14 @@ class QueueMessage:
 
 class RedisQueueConsumer:
     def __init__(self) -> None:
-        self._client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
+        self.redis_url = settings.redis_url
+        self._client = redis.Redis.from_url(
+            settings.redis_url,
+            decode_responses=True,
+            socket_connect_timeout=3,
+            socket_timeout=8,
+            retry_on_timeout=True,
+        )
 
     def pop(self, timeout: int = 5) -> QueueMessage | None:
         response = self._client.blpop(settings.job_queue_key, timeout=timeout)

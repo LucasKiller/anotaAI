@@ -2,6 +2,8 @@ import logging
 import time
 from uuid import UUID
 
+from redis.exceptions import RedisError
+
 from app.database import SessionLocal, init_db
 from app.jobs.pipeline import PipelineProcessor
 from app.logging_config import setup_logging
@@ -17,7 +19,16 @@ def run_worker() -> None:
     logger.info("Worker started; waiting for jobs")
 
     while True:
-        message = consumer.pop(timeout=5)
+        try:
+            message = consumer.pop(timeout=5)
+        except (RedisError, TimeoutError):
+            logger.exception(
+                "Redis unavailable while reading queue. url=%s. Retrying in 3s",
+                consumer.redis_url,
+            )
+            time.sleep(3)
+            continue
+
         if not message:
             continue
 

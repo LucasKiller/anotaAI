@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from app.integrations.storage.s3_storage import StorageUploadError
 from app.models import User
 from app.schemas import CompleteUploadRequest, MessageResponse, UploadResponse
 from app.services import RecordingService, UploadService
@@ -27,6 +28,8 @@ def upload_recording(
         uploaded = upload_service.upload_audio(recording=recording, upload=file)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except StorageUploadError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
     return UploadResponse.model_validate(uploaded)
 

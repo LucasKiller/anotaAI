@@ -10,6 +10,7 @@ venv/
 
 # Flutter / Dart
 .dart_tool/
+.flutter-plugins-dependencies
 .packages
 .pub/
 build/

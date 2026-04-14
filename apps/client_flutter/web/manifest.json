@@ -1,0 +1,12 @@
+{
+  "name": "AnotaAi",
+  "short_name": "AnotaAi",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#f5efe3",
+  "theme_color": "#1e6f5c",
+  "description": "AnotaAi frontend em Flutter",
+  "orientation": "portrait-primary",
+  "prefer_related_applications": false,
+  "icons": []
+}
