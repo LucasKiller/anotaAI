@@ -19,6 +19,10 @@ class ChatSessionResponse(BaseModel):
     updated_at: datetime
 
 
+class ChatSessionListResponse(BaseModel):
+    items: list[ChatSessionResponse]
+
+
 class ChatMessageCreate(BaseModel):
     content: str = Field(min_length=1)
 

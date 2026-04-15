@@ -37,8 +37,8 @@ class S3Storage:
             aws_secret_access_key=settings.s3_secret_key,
             region_name=settings.s3_region,
             config=Config(
-                connect_timeout=5,
-                read_timeout=30,
+                connect_timeout=settings.s3_connect_timeout_seconds,
+                read_timeout=settings.s3_read_timeout_seconds,
                 retries={"max_attempts": 2, "mode": "standard"},
                 s3={"addressing_style": "path" if settings.s3_force_path_style else "auto"},
             ),

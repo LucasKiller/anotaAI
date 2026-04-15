@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     s3_access_key: str = "minioadmin"
     s3_secret_key: str = "minioadmin"
     s3_force_path_style: bool = True
+    s3_connect_timeout_seconds: int = 5
+    s3_read_timeout_seconds: int = 120
 
     jwt_secret: str = "change-me-access"
     jwt_refresh_secret: str = "change-me-refresh"
@@ -29,6 +31,9 @@ class Settings(BaseSettings):
 
     llm_provider: str = "ollama"
     llm_base_url: str = "http://localhost:11434/api"
+    llm_api_key: str | None = None
+    llm_model: str = "gemma3:4b"
+    llm_timeout_seconds: int = 120
 
     transcription_provider: str = "local_whisper"
     embeddings_provider: str = "local"

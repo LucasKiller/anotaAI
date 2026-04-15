@@ -1,11 +1,13 @@
-import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart';
 
 import '../../core/auth/auth_controller.dart';
 import '../../core/network/api_client.dart';
+import '../../shared/models/chat_models.dart';
 import '../../shared/models/job_model.dart';
 import '../../shared/models/recording_model.dart';
 import '../../shared/widgets/content_section.dart';
+import '../chat/chat_controller.dart';
 import '../recordings/recordings_controller.dart';
 
 class DashboardPage extends StatefulWidget {
@@ -19,12 +21,16 @@ class DashboardPage extends StatefulWidget {
 
 class _DashboardPageState extends State<DashboardPage> {
   final _newRecordingController = TextEditingController();
+  final _chatInputController = TextEditingController();
+
   late final RecordingsController _recordingsController;
+  late final ChatController _chatController;
 
   @override
   void initState() {
     super.initState();
     _recordingsController = RecordingsController();
+    _chatController = ChatController();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadInitial();
     });
@@ -33,7 +39,9 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   void dispose() {
     _newRecordingController.dispose();
+    _chatInputController.dispose();
     _recordingsController.dispose();
+    _chatController.dispose();
     super.dispose();
   }
 
@@ -45,6 +53,13 @@ class _DashboardPageState extends State<DashboardPage> {
 
     try {
       await _recordingsController.bootstrap(accessToken: token);
+      final selected = _recordingsController.selected;
+      if (selected != null) {
+        await _chatController.loadForRecording(
+          accessToken: token,
+          recordingId: selected.id,
+        );
+      }
     } on ApiException catch (error) {
       _showMessage(error.message);
     }
@@ -60,8 +75,19 @@ class _DashboardPageState extends State<DashboardPage> {
 
     try {
       await _recordingsController.createRecording(
-          accessToken: token, title: title);
+        accessToken: token,
+        title: title,
+      );
       _newRecordingController.clear();
+      final selected = _recordingsController.selected;
+      if (selected != null) {
+        await _chatController.loadForRecording(
+          accessToken: token,
+          recordingId: selected.id,
+        );
+      } else {
+        _chatController.clear();
+      }
     } on ApiException catch (error) {
       _showMessage(error.message);
     }
@@ -75,7 +101,13 @@ class _DashboardPageState extends State<DashboardPage> {
 
     try {
       await _recordingsController.selectRecording(
-          accessToken: token, recordingId: recording.id);
+        accessToken: token,
+        recordingId: recording.id,
+      );
+      await _chatController.loadForRecording(
+        accessToken: token,
+        recordingId: recording.id,
+      );
     } on ApiException catch (error) {
       _showMessage(error.message);
     }
@@ -150,7 +182,46 @@ class _DashboardPageState extends State<DashboardPage> {
 
     try {
       await _recordingsController.reloadDetails(
-          accessToken: token, recordingId: selected.id);
+        accessToken: token,
+        recordingId: selected.id,
+      );
+    } on ApiException catch (error) {
+      _showMessage(error.message);
+    }
+  }
+
+  Future<void> _refreshChat() async {
+    final token = widget.authController.accessToken;
+    final selected = _recordingsController.selected;
+    if (token == null || selected == null) {
+      return;
+    }
+
+    try {
+      await _chatController.loadForRecording(
+        accessToken: token,
+        recordingId: selected.id,
+      );
+    } on ApiException catch (error) {
+      _showMessage(error.message);
+    }
+  }
+
+  Future<void> _sendChatMessage() async {
+    final token = widget.authController.accessToken;
+    final selected = _recordingsController.selected;
+    final content = _chatInputController.text.trim();
+    if (token == null || selected == null || content.isEmpty) {
+      return;
+    }
+
+    try {
+      await _chatController.sendMessage(
+        accessToken: token,
+        recordingId: selected.id,
+        content: content,
+      );
+      _chatInputController.clear();
     } on ApiException catch (error) {
       _showMessage(error.message);
     }
@@ -337,6 +408,15 @@ class _DashboardPageState extends State<DashboardPage> {
         accessToken: token,
         recordingId: selected.id,
       );
+      final currentSelected = _recordingsController.selected;
+      if (currentSelected != null) {
+        await _chatController.loadForRecording(
+          accessToken: token,
+          recordingId: currentSelected.id,
+        );
+      } else {
+        _chatController.clear();
+      }
       _showMessage('Gravacao excluida.');
     } on ApiException catch (error) {
       _showMessage(error.message);
@@ -354,7 +434,8 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: _recordingsController,
+      animation: Listenable.merge(
+          <Listenable>[_recordingsController, _chatController]),
       builder: (context, _) {
         final selected = _recordingsController.selected;
         final width = MediaQuery.of(context).size.width;
@@ -479,13 +560,14 @@ class _DashboardPageState extends State<DashboardPage> {
                           itemCount: recordings.length,
                           itemBuilder: (context, index) {
                             final recording = recordings[index];
-                            final selected =
+                            final isSelected =
                                 _recordingsController.selected?.id ==
                                     recording.id;
                             return Card(
-                              color: selected ? const Color(0xFFE2F2EE) : null,
+                              color:
+                                  isSelected ? const Color(0xFFE2F2EE) : null,
                               child: ListTile(
-                                selected: selected,
+                                selected: isSelected,
                                 title: Text(recording.title),
                                 subtitle: Text('Status: ${recording.status}'),
                                 onTap: () => _selectRecording(recording),
@@ -525,10 +607,11 @@ class _DashboardPageState extends State<DashboardPage> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: <Widget>[
-                              Text(selected.title,
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .headlineSmall),
+                              Text(
+                                selected.title,
+                                style:
+                                    Theme.of(context).textTheme.headlineSmall,
+                              ),
                               const SizedBox(height: 8),
                               Wrap(
                                 spacing: 8,
@@ -595,7 +678,7 @@ class _DashboardPageState extends State<DashboardPage> {
                               label: const Text('Atualizar'),
                             ),
                           ],
-                        )
+                        ),
                       ],
                     ),
                     const SizedBox(height: 16),
@@ -638,9 +721,149 @@ class _DashboardPageState extends State<DashboardPage> {
                         ),
                       ),
                     ),
+                    _buildChatSection(selected),
                   ],
                 ),
               ),
+      ),
+    );
+  }
+
+  Widget _buildChatSection(RecordingModel selected) {
+    return ContentSection(
+      title: 'Chat da Gravacao',
+      actions: <Widget>[
+        IconButton(
+          tooltip: 'Atualizar chat',
+          onPressed: _chatController.isLoading ? null : _refreshChat,
+          icon: const Icon(Icons.refresh),
+        ),
+      ],
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Container(
+            height: 320,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: const Color(0xFFF7F8F5),
+              border: Border.all(color: const Color(0xFFD7D7D1)),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: _chatController.isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : _chatController.messages.isEmpty
+                    ? const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(16),
+                          child: Text(
+                            'Ainda nao ha mensagens. Pergunte algo sobre a gravacao depois que a transcricao estiver pronta.',
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      )
+                    : ListView.separated(
+                        padding: const EdgeInsets.all(12),
+                        itemCount: _chatController.messages.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 10),
+                        itemBuilder: (context, index) {
+                          return _buildChatBubble(
+                              _chatController.messages[index]);
+                        },
+                      ),
+          ),
+          if (_chatController.errorMessage != null &&
+              _chatController.errorMessage!.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 10),
+            Text(
+              _chatController.errorMessage!,
+              style: const TextStyle(color: Colors.redAccent),
+            ),
+          ],
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: <Widget>[
+              Expanded(
+                child: TextField(
+                  controller: _chatInputController,
+                  minLines: 1,
+                  maxLines: 4,
+                  decoration: const InputDecoration(
+                    labelText: 'Pergunte sobre esta gravacao',
+                    border: OutlineInputBorder(),
+                  ),
+                  onSubmitted: (_) => _sendChatMessage(),
+                ),
+              ),
+              const SizedBox(width: 10),
+              FilledButton.icon(
+                onPressed: _chatController.isSending ? null : _sendChatMessage,
+                icon: _chatController.isSending
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.send),
+                label: const Text('Enviar'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Sessao: ${_chatController.session?.title ?? 'Chat principal'}',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChatBubble(ChatMessageModel message) {
+    final isUser = message.isUser;
+    final citations = _citationText(message.citationsJson);
+
+    return Align(
+      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 620),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: isUser ? const Color(0xFF1E6F5C) : const Color(0xFFE6ECE8),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                isUser ? 'Voce' : 'Assistente',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: isUser ? Colors.white : const Color(0xFF20443A),
+                ),
+              ),
+              const SizedBox(height: 6),
+              SelectableText(
+                message.content,
+                style: TextStyle(
+                  color: isUser ? Colors.white : const Color(0xFF1D1D1B),
+                ),
+              ),
+              if (citations != null) ...<Widget>[
+                const SizedBox(height: 8),
+                Text(
+                  citations,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isUser ? Colors.white70 : const Color(0xFF5C5E57),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -665,6 +888,30 @@ class _DashboardPageState extends State<DashboardPage> {
     return SelectableText(subtitle.toString());
   }
 
+  String? _citationText(Object? raw) {
+    if (raw is! List<dynamic> || raw.isEmpty) {
+      return null;
+    }
+
+    final items = <String>[];
+    for (final item in raw) {
+      if (item is! Map<String, dynamic>) {
+        continue;
+      }
+      final startMs = item['start_ms'];
+      final endMs = item['end_ms'];
+      if (startMs is int && endMs is int) {
+        items.add(
+            '[${_formatShortTimestamp(startMs)}-${_formatShortTimestamp(endMs)}]');
+      }
+    }
+
+    if (items.isEmpty) {
+      return null;
+    }
+    return 'Referencias: ${items.join(', ')}';
+  }
+
   String _formatDate(DateTime value) {
     final local = value.toLocal();
     final yyyy = local.year.toString().padLeft(4, '0');
@@ -673,5 +920,12 @@ class _DashboardPageState extends State<DashboardPage> {
     final hh = local.hour.toString().padLeft(2, '0');
     final mi = local.minute.toString().padLeft(2, '0');
     return '$dd/$mm/$yyyy $hh:$mi';
+  }
+
+  String _formatShortTimestamp(int value) {
+    final totalSeconds = value ~/ 1000;
+    final minutes = totalSeconds ~/ 60;
+    final seconds = totalSeconds % 60;
+    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
   }
 }

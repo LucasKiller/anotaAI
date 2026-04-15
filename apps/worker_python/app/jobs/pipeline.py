@@ -74,9 +74,24 @@ class PipelineProcessor:
             build_embeddings_stub(segments_payload)
 
             summary = build_summary_markdown(recording.title, transcription.full_text, segments_payload)
-            mindmap = build_mindmap_json(recording.title, segments_payload)
-            self._create_artifact(recording.id, artifact_type="summary", content_md=summary)
-            self._create_artifact(recording.id, artifact_type="mindmap", content_json=mindmap)
+            mindmap = build_mindmap_json(
+                recording.title,
+                transcription.full_text,
+                segments_payload,
+                summary.content,
+            )
+            self._create_artifact(
+                recording.id,
+                artifact_type="summary",
+                content_md=summary.content,
+                model_name=summary.model_name,
+            )
+            self._create_artifact(
+                recording.id,
+                artifact_type="mindmap",
+                content_json=mindmap.content,
+                model_name=mindmap.model_name,
+            )
             chat_index_result = update_chat_index_stub(str(recording.id))
 
             recording.status = "ready"
@@ -151,6 +166,7 @@ class PipelineProcessor:
         artifact_type: str,
         content_md: str | None = None,
         content_json: dict | None = None,
+        model_name: str | None = None,
     ) -> None:
         next_version = (
             self.db.scalar(
@@ -168,7 +184,7 @@ class PipelineProcessor:
             version=next_version,
             content_md=content_md,
             content_json=content_json,
-            model_name="local-stub",
+            model_name=model_name,
         )
         self.db.add(artifact)
         self.db.flush()

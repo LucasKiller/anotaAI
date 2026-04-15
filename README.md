@@ -112,6 +112,7 @@ set PYTHONPATH=apps\worker_python && python -m app.main
 - `GET /v1/recordings/{id}/transcript`
 - `GET /v1/recordings/{id}/summary`
 - `GET /v1/recordings/{id}/mindmap`
+- `GET /v1/recordings/{id}/chat/sessions`
 - chat por sessão em `/v1/chat/sessions/...`
 
 ## Endpoints de edição já disponíveis
@@ -137,6 +138,8 @@ set PYTHONPATH=apps\worker_python && python -m app.main
 - Áudios vão para MinIO; metadados ficam no Postgres.
 - O pipeline do worker usa `faster-whisper` para transcrição real quando `TRANSCRIPTION_PROVIDER=local_whisper`.
 - Para transcrição local funcionar, `ffmpeg` precisa estar instalado no host/container do worker.
+- Para resumo, mapa mental e chat via gateway, configure `LLM_PROVIDER=ai_gateway`, `LLM_BASE_URL`, `LLM_API_KEY` e `LLM_MODEL`.
+- O `LLM_BASE_URL` deve apontar para o prefixo do seu gateway, por exemplo `https://api.inovv.co/ai/v1/dev`, pois a aplicação chama `/v1/responses` e `/v1/chat/completions` a partir dele.
 - Os pontos de extensão para Whisper/Ollama estão separados em `apps/worker_python/app/jobs/*`.
 - A API já está organizada com `services`, `repositories` e `integrations`.
 

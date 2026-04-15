@@ -5,6 +5,7 @@ from app.schemas.chat import (
     ChatMessageResponse,
     ChatReplyResponse,
     ChatSessionCreate,
+    ChatSessionListResponse,
     ChatSessionDetailResponse,
     ChatSessionResponse,
 )
@@ -27,6 +28,7 @@ __all__ = [
     "ChatMessageResponse",
     "ChatReplyResponse",
     "ChatSessionCreate",
+    "ChatSessionListResponse",
     "ChatSessionDetailResponse",
     "ChatSessionResponse",
     "MessageResponse",
