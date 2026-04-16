@@ -11,6 +11,7 @@ import '../../shared/models/recording_model.dart';
 import '../../shared/widgets/app_markdown.dart';
 import '../../shared/widgets/content_section.dart';
 import '../../shared/widgets/mindmap_viewer.dart';
+import '../recordings/audio_recorder_service.dart';
 import '../chat/chat_controller.dart';
 import '../recordings/recordings_controller.dart';
 
@@ -30,12 +31,25 @@ class _DashboardPageState extends State<DashboardPage> {
 
   late final RecordingsController _recordingsController;
   late final ChatController _chatController;
+  late final AudioRecorderService _audioRecorderService;
+
+  Timer? _liveRecordingTicker;
+  bool _isLiveRecording = false;
+  bool _isLiveRecordingPaused = false;
+  bool _isLiveRecordingBusy = false;
+  bool _isUploadingRecordedAudio = false;
+  Duration _liveRecordingElapsed = Duration.zero;
+  Duration _liveRecordingAccumulated = Duration.zero;
+  DateTime? _liveRecordingStartedAt;
+  RecordedAudioCapture? _pendingRecordedAudio;
+  String? _liveRecordingError;
 
   @override
   void initState() {
     super.initState();
     _recordingsController = RecordingsController();
     _chatController = ChatController();
+    _audioRecorderService = createAudioRecorderService();
     _chatController.addListener(_handleChatChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadInitial();
@@ -47,6 +61,8 @@ class _DashboardPageState extends State<DashboardPage> {
     _newRecordingController.dispose();
     _chatInputController.dispose();
     _chatScrollController.dispose();
+    _liveRecordingTicker?.cancel();
+    unawaited(_audioRecorderService.cancel());
     _chatController.removeListener(_handleChatChanged);
     _recordingsController.dispose();
     _chatController.dispose();
@@ -82,6 +98,295 @@ class _DashboardPageState extends State<DashboardPage> {
     _chatScrollController.jumpTo(position);
   }
 
+  bool get _isLiveRecordingSupported => _audioRecorderService.isSupported;
+
+  bool get _isLiveRecordingLocked =>
+      _isLiveRecording ||
+      _isLiveRecordingBusy ||
+      _isUploadingRecordedAudio ||
+      _pendingRecordedAudio != null;
+
+  Future<void> _startLiveRecording() async {
+    if (!_isLiveRecordingSupported) {
+      _showMessage(
+        'Gravacao ao vivo disponivel apenas em navegadores com suporte a microfone.',
+      );
+      return;
+    }
+
+    setState(() {
+      _isLiveRecordingBusy = true;
+      _liveRecordingError = null;
+    });
+
+    try {
+      await _audioRecorderService.start();
+      _liveRecordingTicker?.cancel();
+      setState(() {
+        _isLiveRecording = true;
+        _isLiveRecordingPaused = false;
+        _liveRecordingElapsed = Duration.zero;
+        _liveRecordingAccumulated = Duration.zero;
+        _liveRecordingStartedAt = DateTime.now();
+        _pendingRecordedAudio = null;
+      });
+      _startLiveRecordingTicker();
+    } catch (error) {
+      setState(() {
+        _liveRecordingError = _humanizeLiveRecordingError(error);
+      });
+      _showMessage(_liveRecordingError!);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLiveRecordingBusy = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _pauseLiveRecording() async {
+    if (!_isLiveRecording || _isLiveRecordingPaused) {
+      return;
+    }
+
+    setState(() {
+      _isLiveRecordingBusy = true;
+      _liveRecordingError = null;
+    });
+
+    try {
+      await _audioRecorderService.pause();
+      _freezeLiveRecordingElapsed();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLiveRecordingPaused = true;
+      });
+    } catch (error) {
+      setState(() {
+        _liveRecordingError = _humanizeLiveRecordingError(error);
+      });
+      _showMessage(_liveRecordingError!);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLiveRecordingBusy = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _resumeLiveRecording() async {
+    if (!_isLiveRecording || !_isLiveRecordingPaused) {
+      return;
+    }
+
+    setState(() {
+      _isLiveRecordingBusy = true;
+      _liveRecordingError = null;
+    });
+
+    try {
+      await _audioRecorderService.resume();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLiveRecordingPaused = false;
+        _liveRecordingStartedAt = DateTime.now();
+      });
+      _startLiveRecordingTicker();
+    } catch (error) {
+      setState(() {
+        _liveRecordingError = _humanizeLiveRecordingError(error);
+      });
+      _showMessage(_liveRecordingError!);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLiveRecordingBusy = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _stopLiveRecording() async {
+    final token = widget.authController.accessToken;
+    final selected = _recordingsController.selected;
+    if (token == null || selected == null || !_isLiveRecording) {
+      return;
+    }
+
+    setState(() {
+      _isLiveRecordingBusy = true;
+      _liveRecordingError = null;
+    });
+
+    try {
+      final captured = await _audioRecorderService.stop();
+      _resetLiveRecordingState();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _pendingRecordedAudio = captured;
+      });
+      await _uploadPendingRecordedAudio(
+        accessToken: token,
+        recordingId: selected.id,
+      );
+    } catch (error) {
+      _resetLiveRecordingState();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _liveRecordingError = _humanizeLiveRecordingError(error);
+      });
+      _showMessage(_liveRecordingError!);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLiveRecordingBusy = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _discardLiveRecording() async {
+    try {
+      if (_isLiveRecording) {
+        await _audioRecorderService.cancel();
+      }
+    } catch (_) {
+      // no-op
+    }
+
+    _resetLiveRecordingState();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _pendingRecordedAudio = null;
+      _liveRecordingError = null;
+    });
+    _showMessage('Gravacao descartada.');
+  }
+
+  Future<void> _uploadPendingRecordedAudio({
+    required String accessToken,
+    required String recordingId,
+  }) async {
+    final pending = _pendingRecordedAudio;
+    if (pending == null) {
+      return;
+    }
+
+    setState(() {
+      _isUploadingRecordedAudio = true;
+      _liveRecordingError = null;
+    });
+
+    try {
+      await _recordingsController.uploadAudio(
+        accessToken: accessToken,
+        recordingId: recordingId,
+        fileName: pending.fileName,
+        bytes: pending.bytes,
+        processAfterUpload: true,
+        waitForCompletion: true,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _pendingRecordedAudio = null;
+      });
+      _showMessage('Gravacao enviada e processada com sucesso.');
+    } on ApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _liveRecordingError = error.message;
+      });
+      _showMessage(
+        'Falha ao enviar a gravacao. O audio ficou salvo na sessao para reenviar.',
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isUploadingRecordedAudio = false;
+        });
+      }
+    }
+  }
+
+  void _startLiveRecordingTicker() {
+    _liveRecordingTicker?.cancel();
+    _liveRecordingTicker = Timer.periodic(
+      const Duration(milliseconds: 250),
+      (_) {
+        if (!mounted ||
+            !_isLiveRecording ||
+            _isLiveRecordingPaused ||
+            _liveRecordingStartedAt == null) {
+          return;
+        }
+        final elapsed = _liveRecordingAccumulated +
+            DateTime.now().difference(_liveRecordingStartedAt!);
+        setState(() {
+          _liveRecordingElapsed = elapsed;
+        });
+      },
+    );
+  }
+
+  void _freezeLiveRecordingElapsed() {
+    _liveRecordingTicker?.cancel();
+    if (_liveRecordingStartedAt != null) {
+      _liveRecordingAccumulated +=
+          DateTime.now().difference(_liveRecordingStartedAt!);
+    }
+    _liveRecordingStartedAt = null;
+    _liveRecordingElapsed = _liveRecordingAccumulated;
+  }
+
+  void _resetLiveRecordingState() {
+    _liveRecordingTicker?.cancel();
+    if (!mounted) {
+      _isLiveRecording = false;
+      _isLiveRecordingPaused = false;
+      _liveRecordingElapsed = Duration.zero;
+      _liveRecordingAccumulated = Duration.zero;
+      _liveRecordingStartedAt = null;
+      return;
+    }
+    setState(() {
+      _isLiveRecording = false;
+      _isLiveRecordingPaused = false;
+      _liveRecordingElapsed = Duration.zero;
+      _liveRecordingAccumulated = Duration.zero;
+      _liveRecordingStartedAt = null;
+    });
+  }
+
+  String _humanizeLiveRecordingError(Object error) {
+    final raw = error.toString();
+    if (raw.contains('NotAllowedError')) {
+      return 'Permissao de microfone negada pelo navegador.';
+    }
+    if (raw.contains('NotFoundError')) {
+      return 'Nenhum microfone disponivel foi encontrado.';
+    }
+    if (raw.contains('UnsupportedError')) {
+      return 'O navegador atual nao suporta gravacao ao vivo.';
+    }
+    return raw.replaceFirst('Exception: ', '').replaceFirst('StateError: ', '');
+  }
+
   Future<void> _loadInitial() async {
     final token = widget.authController.accessToken;
     if (token == null) {
@@ -103,6 +408,12 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> _createRecording() async {
+    if (_isLiveRecordingLocked) {
+      _showMessage(
+        'Finalize, envie ou descarte a gravacao ao vivo atual antes de criar outra.',
+      );
+      return;
+    }
     final token = widget.authController.accessToken;
     final title = _newRecordingController.text.trim();
     if (token == null || title.isEmpty) {
@@ -131,6 +442,12 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> _selectRecording(RecordingModel recording) async {
+    if (_isLiveRecordingLocked) {
+      _showMessage(
+        'Finalize, envie ou descarte a gravacao ao vivo atual antes de trocar de gravacao.',
+      );
+      return;
+    }
     final token = widget.authController.accessToken;
     if (token == null) {
       return;
@@ -151,6 +468,12 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> _processRecording() async {
+    if (_isLiveRecordingLocked) {
+      _showMessage(
+        'Finalize, envie ou descarte a gravacao ao vivo atual antes de processar.',
+      );
+      return;
+    }
     final token = widget.authController.accessToken;
     final selected = _recordingsController.selected;
     if (token == null || selected == null) {
@@ -171,6 +494,12 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> _uploadAudio() async {
+    if (_isLiveRecordingLocked) {
+      _showMessage(
+        'Finalize, envie ou descarte a gravacao ao vivo atual antes de enviar outro arquivo.',
+      );
+      return;
+    }
     final token = widget.authController.accessToken;
     final selected = _recordingsController.selected;
     if (token == null || selected == null) {
@@ -484,6 +813,12 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> _editSelectedRecording() async {
+    if (_isLiveRecordingLocked) {
+      _showMessage(
+        'Finalize, envie ou descarte a gravacao ao vivo atual antes de editar a gravacao.',
+      );
+      return;
+    }
     final token = widget.authController.accessToken;
     final selected = _recordingsController.selected;
     if (token == null || selected == null) {
@@ -577,6 +912,12 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> _deleteSelectedRecording() async {
+    if (_isLiveRecordingLocked) {
+      _showMessage(
+        'Finalize, envie ou descarte a gravacao ao vivo atual antes de excluir a gravacao.',
+      );
+      return;
+    }
     final token = widget.authController.accessToken;
     final selected = _recordingsController.selected;
     if (token == null || selected == null) {
@@ -723,7 +1064,8 @@ class _DashboardPageState extends State<DashboardPage> {
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
-                onPressed: _recordingsController.isListLoading
+                onPressed: _recordingsController.isListLoading ||
+                        _isLiveRecordingLocked
                     ? null
                     : _createRecording,
                 icon: const Icon(Icons.add),
@@ -740,7 +1082,8 @@ class _DashboardPageState extends State<DashboardPage> {
                 const Spacer(),
                 IconButton(
                   tooltip: 'Atualizar lista',
-                  onPressed: _recordingsController.isListLoading
+                  onPressed: _recordingsController.isListLoading ||
+                          _isLiveRecordingLocked
                       ? null
                       : () async {
                           final token = widget.authController.accessToken;
@@ -779,7 +1122,9 @@ class _DashboardPageState extends State<DashboardPage> {
                                 selected: isSelected,
                                 title: Text(recording.title),
                                 subtitle: Text('Status: ${recording.status}'),
-                                onTap: () => _selectRecording(recording),
+                                onTap: _isLiveRecordingLocked
+                                    ? null
+                                    : () => _selectRecording(recording),
                               ),
                             );
                           },
@@ -858,31 +1203,40 @@ class _DashboardPageState extends State<DashboardPage> {
                         Column(
                           children: <Widget>[
                             FilledButton.tonalIcon(
-                              onPressed: _editSelectedRecording,
+                              onPressed: _isLiveRecordingLocked
+                                  ? null
+                                  : _editSelectedRecording,
                               icon: const Icon(Icons.edit),
                               label: const Text('Editar'),
                             ),
                             const SizedBox(height: 8),
                             OutlinedButton.icon(
-                              onPressed: _deleteSelectedRecording,
+                              onPressed: _isLiveRecordingLocked
+                                  ? null
+                                  : _deleteSelectedRecording,
                               icon: const Icon(Icons.delete_outline),
                               label: const Text('Excluir'),
                             ),
                             const SizedBox(height: 8),
                             FilledButton.icon(
-                              onPressed: _uploadAudio,
+                              onPressed:
+                                  _isLiveRecordingLocked ? null : _uploadAudio,
                               icon: const Icon(Icons.upload_file),
                               label: const Text('Enviar audio'),
                             ),
                             const SizedBox(height: 8),
                             FilledButton.icon(
-                              onPressed: _processRecording,
+                              onPressed: _isLiveRecordingLocked
+                                  ? null
+                                  : _processRecording,
                               icon: const Icon(Icons.play_arrow),
                               label: const Text('Processar'),
                             ),
                             const SizedBox(height: 8),
                             OutlinedButton.icon(
-                              onPressed: _refreshDetails,
+                              onPressed: _isLiveRecordingLocked
+                                  ? null
+                                  : _refreshDetails,
                               icon: const Icon(Icons.refresh),
                               label: const Text('Atualizar'),
                             ),
@@ -890,6 +1244,8 @@ class _DashboardPageState extends State<DashboardPage> {
                         ),
                       ],
                     ),
+                    const SizedBox(height: 16),
+                    _buildLiveRecordingSection(selected),
                     const SizedBox(height: 16),
                     if (_recordingsController.latestJob != null)
                       ContentSection(
@@ -926,6 +1282,186 @@ class _DashboardPageState extends State<DashboardPage> {
                   ],
                 ),
               ),
+      ),
+    );
+  }
+
+  Widget _buildLiveRecordingSection(RecordingModel selected) {
+    final statusLabel = _isUploadingRecordedAudio
+        ? 'Enviando e processando'
+        : _pendingRecordedAudio != null
+            ? 'Pronto para enviar'
+            : _isLiveRecording
+                ? _isLiveRecordingPaused
+                    ? 'Pausado'
+                    : 'Gravando'
+                : 'Parado';
+
+    final statusColor = _isUploadingRecordedAudio
+        ? const Color(0xFF9C6B00)
+        : _pendingRecordedAudio != null
+            ? const Color(0xFF175CD3)
+            : _isLiveRecording
+                ? (_isLiveRecordingPaused
+                    ? const Color(0xFF7A5A00)
+                    : const Color(0xFFB42318))
+                : const Color(0xFF667085);
+
+    final liveHint = _pendingRecordedAudio != null
+        ? 'O audio gravado ficou pronto. Você pode reenviar ou descartar.'
+        : _isLiveRecording
+            ? 'Ao finalizar, o upload e o processamento serao disparados automaticamente para esta gravacao.'
+            : 'Grave direto do navegador, pause se precisar e finalize quando quiser subir o audio gravado.';
+
+    return ContentSection(
+      title: 'Gravacao Ao Vivo',
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8FAFC),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: const Color(0xFFE4E7EC)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: <Widget>[
+                _StatusChip(
+                  label: statusLabel,
+                  color: statusColor,
+                ),
+                _InfoChip(
+                  label: _formatRecordingElapsed(_liveRecordingElapsed),
+                  icon: Icons.fiber_manual_record,
+                  color: _isLiveRecording && !_isLiveRecordingPaused
+                      ? const Color(0xFFB42318)
+                      : const Color(0xFF475467),
+                ),
+                _InfoChip(
+                  label: selected.title,
+                  icon: Icons.mic_external_on_outlined,
+                  color: const Color(0xFF344054),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              liveHint,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: const Color(0xFF475467),
+                    height: 1.5,
+                  ),
+            ),
+            if (!_isLiveRecordingSupported) ...<Widget>[
+              const SizedBox(height: 12),
+              Text(
+                'Esta funcionalidade depende de navegador com acesso a microfone. No MVP, ela fica disponivel no Flutter web.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFFB42318),
+                    ),
+              ),
+            ],
+            if (_liveRecordingError != null &&
+                _liveRecordingError!.trim().isNotEmpty) ...<Widget>[
+              const SizedBox(height: 12),
+              Text(
+                _liveRecordingError!,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFFB42318),
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+            ],
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: <Widget>[
+                FilledButton.icon(
+                  onPressed: !_isLiveRecordingSupported ||
+                          _isLiveRecording ||
+                          _isLiveRecordingBusy ||
+                          _isUploadingRecordedAudio ||
+                          _pendingRecordedAudio != null
+                      ? null
+                      : _startLiveRecording,
+                  icon: const Icon(Icons.mic),
+                  label: const Text('Iniciar gravacao'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFB42318),
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+                OutlinedButton.icon(
+                  onPressed: !_isLiveRecording ||
+                          _isLiveRecordingPaused ||
+                          _isLiveRecordingBusy
+                      ? null
+                      : _pauseLiveRecording,
+                  icon: const Icon(Icons.pause_circle_outline),
+                  label: const Text('Pausar'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: !_isLiveRecording ||
+                          !_isLiveRecordingPaused ||
+                          _isLiveRecordingBusy
+                      ? null
+                      : _resumeLiveRecording,
+                  icon: const Icon(Icons.play_circle_outline),
+                  label: const Text('Continuar'),
+                ),
+                FilledButton.tonalIcon(
+                  onPressed: !_isLiveRecording || _isLiveRecordingBusy
+                      ? null
+                      : _stopLiveRecording,
+                  icon: const Icon(Icons.stop_circle_outlined),
+                  label: Text(
+                    _isUploadingRecordedAudio
+                        ? 'Finalizando...'
+                        : 'Finalizar e enviar',
+                  ),
+                ),
+                OutlinedButton.icon(
+                  onPressed: (_isLiveRecording || _pendingRecordedAudio != null) &&
+                          !_isLiveRecordingBusy &&
+                          !_isUploadingRecordedAudio
+                      ? _discardLiveRecording
+                      : null,
+                  icon: const Icon(Icons.delete_sweep_outlined),
+                  label: const Text('Descartar'),
+                ),
+                if (_pendingRecordedAudio != null)
+                  FilledButton.icon(
+                    onPressed: _isUploadingRecordedAudio
+                        ? null
+                        : () {
+                            final token = widget.authController.accessToken;
+                            if (token == null) {
+                              return;
+                            }
+                            _uploadPendingRecordedAudio(
+                              accessToken: token,
+                              recordingId: selected.id,
+                            );
+                          },
+                    icon: _isUploadingRecordedAudio
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.cloud_upload_outlined),
+                    label: const Text('Enviar novamente'),
+                  ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1280,6 +1816,97 @@ class _DashboardPageState extends State<DashboardPage> {
     final minutes = totalSeconds ~/ 60;
     final seconds = totalSeconds % 60;
     return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  String _formatRecordingElapsed(Duration value) {
+    final hours = value.inHours;
+    final minutes = value.inMinutes.remainder(60);
+    final seconds = value.inSeconds.remainder(60);
+    if (hours > 0) {
+      return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+    }
+    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  }
+}
+
+class _StatusChip extends StatelessWidget {
+  const _StatusChip({
+    required this.label,
+    required this.color,
+  });
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.24)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InfoChip extends StatelessWidget {
+  const _InfoChip({
+    required this.label,
+    required this.icon,
+    required this.color,
+  });
+
+  final String label;
+  final IconData icon;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0xFFE4E7EC)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
