@@ -54,13 +54,14 @@ class RecordingsService {
   Future<RecordingModel> createRecording({
     required String accessToken,
     required String title,
+    String sourceType = 'upload',
   }) async {
     final response = await _apiClient.post(
       '/recordings',
       accessToken: accessToken,
       body: {
         'title': title,
-        'source_type': 'upload',
+        'source_type': sourceType,
       },
     ) as Map<String, dynamic>;
 

@@ -28,7 +28,7 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
-  final _newRecordingController = TextEditingController();
+  final _homeSearchController = TextEditingController();
   final _chatInputController = TextEditingController();
   final _chatScrollController = ScrollController();
   final _transcriptScrollController = ScrollController();
@@ -48,6 +48,9 @@ class _DashboardPageState extends State<DashboardPage> {
   DateTime? _liveRecordingStartedAt;
   RecordedAudioCapture? _pendingRecordedAudio;
   String? _liveRecordingError;
+  int _currentTabIndex = 0;
+  String _recordingFilter = 'all';
+  String _searchQuery = '';
 
   @override
   void initState() {
@@ -64,7 +67,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
   @override
   void dispose() {
-    _newRecordingController.dispose();
+    _homeSearchController.dispose();
     _chatInputController.dispose();
     _chatScrollController.dispose();
     _transcriptScrollController.dispose();
@@ -410,41 +413,6 @@ class _DashboardPageState extends State<DashboardPage> {
           accessToken: token,
           recordingId: selected.id,
         );
-      }
-    } on ApiException catch (error) {
-      _showMessage(error.message);
-    }
-  }
-
-  Future<void> _createRecording() async {
-    if (_isLiveRecordingLocked) {
-      _showMessage(
-        'Finalize, envie ou descarte a gravacao ao vivo atual antes de criar outra.',
-      );
-      return;
-    }
-    final token = widget.authController.accessToken;
-    final title = _newRecordingController.text.trim();
-    if (token == null || title.isEmpty) {
-      _showMessage('Informe um titulo para a gravacao.');
-      return;
-    }
-
-    try {
-      await _recordingsController.createRecording(
-        accessToken: token,
-        title: title,
-      );
-      _audioPlayerController.reset();
-      _newRecordingController.clear();
-      final selected = _recordingsController.selected;
-      if (selected != null) {
-        await _chatController.loadForRecording(
-          accessToken: token,
-          recordingId: selected.id,
-        );
-      } else {
-        _chatController.clear();
       }
     } on ApiException catch (error) {
       _showMessage(error.message);
@@ -1019,159 +987,1912 @@ class _DashboardPageState extends State<DashboardPage> {
         .showSnackBar(SnackBar(content: Text(message)));
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: Listenable.merge(
-          <Listenable>[_recordingsController, _chatController]),
-      builder: (context, _) {
-        final selected = _recordingsController.selected;
-        final width = MediaQuery.of(context).size.width;
-        final narrow = width < 980;
+  Future<void> _openCreateRecordingSheet() async {
+    if (_isLiveRecordingLocked) {
+      _showMessage(
+        'Finalize, envie ou descarte a gravacao atual antes de criar outra.',
+      );
+      return;
+    }
 
-        return Scaffold(
-          appBar: AppBar(
-            title: const Text('AnotaAi Dashboard'),
-            actions: <Widget>[
-              if (widget.authController.currentUser?.name != null)
-                Center(
-                  child: Padding(
-                    padding: const EdgeInsets.only(right: 12),
-                    child: Text(widget.authController.currentUser!.name!),
+    final choice = await showModalBottomSheet<_QuickCreateChoice?>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => const _QuickCreateSheet(),
+    );
+
+    if (choice == null) {
+      return;
+    }
+
+    final recording = await _createRecordingForMode(choice);
+    if (recording == null || !mounted) {
+      return;
+    }
+
+    if (choice.mode == _QuickCreateMode.liveRecording) {
+      await _openRecordingWorkspace(
+        recording,
+        autoStartLiveRecording: true,
+      );
+      return;
+    }
+
+    await _uploadAudio();
+    if (!mounted) {
+      return;
+    }
+    await _openRecordingWorkspace(recording);
+  }
+
+  Future<RecordingModel?> _createRecordingForMode(_QuickCreateChoice choice) async {
+    final token = widget.authController.accessToken;
+    if (token == null) {
+      return null;
+    }
+
+    final title = choice.title.trim().isEmpty
+        ? _defaultRecordingTitle(choice.mode)
+        : choice.title.trim();
+
+    try {
+      await _recordingsController.createRecording(
+        accessToken: token,
+        title: title,
+        sourceType: choice.mode == _QuickCreateMode.liveRecording
+            ? 'live_recording'
+            : 'upload',
+      );
+      _audioPlayerController.reset();
+      final selected = _recordingsController.selected;
+      if (selected != null) {
+        await _chatController.loadForRecording(
+          accessToken: token,
+          recordingId: selected.id,
+        );
+      }
+      return selected;
+    } on ApiException catch (error) {
+      _showMessage(error.message);
+      return null;
+    }
+  }
+
+  String _defaultRecordingTitle(_QuickCreateMode mode) {
+    final now = DateTime.now();
+    final suffix =
+        '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+    return mode == _QuickCreateMode.liveRecording
+        ? 'Gravacao ao vivo $suffix'
+        : 'Upload de audio $suffix';
+  }
+
+  Future<void> _openRecordingWorkspace(
+    RecordingModel recording, {
+    bool autoStartLiveRecording = false,
+  }) async {
+    await _selectRecording(recording);
+    if (!mounted) {
+      return;
+    }
+
+    if (autoStartLiveRecording) {
+      Future<void>.delayed(const Duration(milliseconds: 250), () async {
+        if (!mounted || _isLiveRecording) {
+          return;
+        }
+        await _startLiveRecording();
+      });
+    }
+
+    if (_useDesktopDashboardLayout(context)) {
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return FractionallySizedBox(
+          heightFactor: 0.94,
+          child: Container(
+            decoration: const BoxDecoration(
+              color: Color(0xFFF2F4F7),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+            ),
+            child: Column(
+              children: <Widget>[
+                const SizedBox(height: 10),
+                Container(
+                  width: 56,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFD0D5DD),
+                    borderRadius: BorderRadius.circular(999),
                   ),
                 ),
-              Center(
-                child: Padding(
-                  padding: const EdgeInsets.only(right: 12),
-                  child: Text(widget.authController.currentUser?.email ?? ''),
-                ),
-              ),
-              IconButton(
-                tooltip: 'Editar nome',
-                onPressed: _editProfileName,
-                icon: const Icon(Icons.person),
-              ),
-              IconButton(
-                tooltip: 'Configurar IA',
-                onPressed: _editAiSettings,
-                icon: const Icon(Icons.tune),
-              ),
-              IconButton(
-                tooltip: 'Sair',
-                onPressed: _logout,
-                icon: const Icon(Icons.logout),
-              ),
-            ],
-          ),
-          body: Padding(
-            padding: const EdgeInsets.all(16),
-            child: narrow
-                ? Column(
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 10),
+                  child: Row(
                     children: <Widget>[
-                      Expanded(flex: 5, child: _buildListPanel()),
-                      const SizedBox(height: 12),
-                      Expanded(flex: 6, child: _buildDetailPanel(selected)),
-                    ],
-                  )
-                : Row(
-                    children: <Widget>[
-                      SizedBox(width: 360, child: _buildListPanel()),
+                      Expanded(
+                        child: Text(
+                          _recordingsController.selected?.title ??
+                              'Workspace da gravacao',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF101828),
+                          ),
+                        ),
+                      ),
                       const SizedBox(width: 12),
-                      Expanded(child: _buildDetailPanel(selected)),
+                      IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
                     ],
                   ),
+                ),
+                Expanded(
+                  child: AnimatedBuilder(
+                    animation: Listenable.merge(
+                      <Listenable>[
+                        _recordingsController,
+                        _chatController,
+                        _audioPlayerController,
+                      ],
+                    ),
+                    builder: (context, _) {
+                      return Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                        child:
+                            _buildDetailPanel(_recordingsController.selected),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
           ),
         );
       },
     );
   }
 
-  Widget _buildListPanel() {
-    final recordings = _recordingsController.recordings;
+  Future<void> _showRecordingActions(RecordingModel recording) async {
+    final action = await showModalBottomSheet<_RecordingAction?>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFF13171D),
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(color: const Color(0xFF262B33)),
+            ),
+            child: SafeArea(
+              top: false,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  const SizedBox(height: 10),
+                  Container(
+                    width: 48,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF303743),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  _buildActionTile(
+                    icon: Icons.open_in_full_rounded,
+                    label: 'Abrir workspace',
+                    onTap: () => Navigator.of(context).pop(_RecordingAction.open),
+                  ),
+                  _buildActionTile(
+                    icon: Icons.play_circle_outline_rounded,
+                    label: 'Processar novamente',
+                    onTap: () => Navigator.of(context).pop(_RecordingAction.process),
+                  ),
+                  _buildActionTile(
+                    icon: Icons.edit_outlined,
+                    label: 'Editar detalhes',
+                    onTap: () => Navigator.of(context).pop(_RecordingAction.edit),
+                  ),
+                  _buildActionTile(
+                    icon: Icons.delete_outline_rounded,
+                    label: 'Excluir',
+                    destructive: true,
+                    onTap: () => Navigator.of(context).pop(_RecordingAction.delete),
+                  ),
+                  const SizedBox(height: 10),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          children: <Widget>[
-            TextField(
-              controller: _newRecordingController,
-              decoration: const InputDecoration(
-                labelText: 'Nova gravacao',
-                hintText: 'Ex.: Aula de biologia',
-                border: OutlineInputBorder(),
+    if (action == null) {
+      return;
+    }
+
+    await _selectRecording(recording);
+    switch (action) {
+      case _RecordingAction.open:
+        await _openRecordingWorkspace(recording);
+        break;
+      case _RecordingAction.process:
+        await _processRecording();
+        break;
+      case _RecordingAction.edit:
+        await _editSelectedRecording();
+        break;
+      case _RecordingAction.delete:
+        await _deleteSelectedRecording();
+        break;
+    }
+  }
+
+  Widget _buildActionTile({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    bool destructive = false,
+  }) {
+    final color = destructive ? const Color(0xFFFF6B6B) : Colors.white;
+    return ListTile(
+      onTap: onTap,
+      leading: Icon(icon, color: color),
+      title: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  Iterable<RecordingModel> get _visibleRecordings {
+    final query = _searchQuery.trim().toLowerCase();
+    return _recordingsController.recordings.where((recording) {
+      final matchesFilter = switch (_recordingFilter) {
+        'ready' => recording.status == 'ready',
+        'processing' => recording.status == 'processing',
+        'failed' => recording.status == 'failed',
+        _ => true,
+      };
+      if (!matchesFilter) {
+        return false;
+      }
+      if (query.isEmpty) {
+        return true;
+      }
+      final haystack = <String>[
+        recording.title,
+        recording.description ?? '',
+        recording.language ?? '',
+      ].join(' ').toLowerCase();
+      return haystack.contains(query);
+    });
+  }
+
+  List<_RecordingGroup> get _groupedRecordings {
+    final map = <DateTime, List<RecordingModel>>{};
+    for (final recording in _visibleRecordings) {
+      final localDate = recording.createdAt.toLocal();
+      final key = DateTime(localDate.year, localDate.month, localDate.day);
+      map.putIfAbsent(key, () => <RecordingModel>[]).add(recording);
+    }
+    final days = map.keys.toList()
+      ..sort((a, b) => b.compareTo(a));
+    return days
+        .map(
+          (day) => _RecordingGroup(
+            day: day,
+            items: map[day]!..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
+          ),
+        )
+        .toList();
+  }
+
+  String _recordingEmoji(RecordingModel recording) {
+    final text =
+        '${recording.title} ${recording.description ?? ''}'.toLowerCase();
+    if (text.contains('reuni') || text.contains('meeting')) {
+      return '🤝';
+    }
+    if (text.contains('bio') ||
+        text.contains('quim') ||
+        text.contains('fisic') ||
+        text.contains('laborat')) {
+      return '🧪';
+    }
+    if (text.contains('math') ||
+        text.contains('algebra') ||
+        text.contains('calculo') ||
+        text.contains('estat')) {
+      return '📐';
+    }
+    if (text.contains('hist') || text.contains('geo')) {
+      return '🗺️';
+    }
+    if (text.contains('python') ||
+        text.contains('flutter') ||
+        text.contains('codigo') ||
+        text.contains('program')) {
+      return '💻';
+    }
+    if (text.contains('direito') || text.contains('legal')) {
+      return '⚖️';
+    }
+    if (text.contains('med') || text.contains('saud')) {
+      return '🩺';
+    }
+    if (text.contains('ingles') ||
+        text.contains('espanhol') ||
+        text.contains('idioma') ||
+        text.contains('lingua')) {
+      return '🗣️';
+    }
+    if (text.contains('mark') || text.contains('venda') || text.contains('negoc')) {
+      return '📈';
+    }
+    return '🎙️';
+  }
+
+  String _formatDayHeader(DateTime day) {
+    const weekdays = <String>[
+      'segunda-feira',
+      'terca-feira',
+      'quarta-feira',
+      'quinta-feira',
+      'sexta-feira',
+      'sabado',
+      'domingo',
+    ];
+    const months = <String>[
+      'jan.',
+      'fev.',
+      'mar.',
+      'abr.',
+      'mai.',
+      'jun.',
+      'jul.',
+      'ago.',
+      'set.',
+      'out.',
+      'nov.',
+      'dez.',
+    ];
+    return '${weekdays[day.weekday - 1]}, ${months[day.month - 1]} ${day.day}';
+  }
+
+  String _formatRecordingMeta(RecordingModel recording) {
+    final local = recording.createdAt.toLocal();
+    final hh = local.hour.toString().padLeft(2, '0');
+    final mm = local.minute.toString().padLeft(2, '0');
+    final duration = recording.durationMs == null
+        ? null
+        : _formatDurationMs(recording.durationMs!);
+    return duration == null ? '$hh:$mm' : '$hh:$mm  ·  $duration';
+  }
+
+  String _formatDurationMs(int value) {
+    final totalMinutes = value ~/ 60000;
+    if (totalMinutes >= 60) {
+      final hours = totalMinutes ~/ 60;
+      final minutes = totalMinutes % 60;
+      return '${hours}h${minutes.toString().padLeft(2, '0')}';
+    }
+    return '${totalMinutes}min';
+  }
+
+  String _profileAiSummary() {
+    final settings = widget.authController.aiSettings;
+    if (settings == null) {
+      return 'Usando configuracao padrao do sistema.';
+    }
+    final provider = settings.isOpenAi ? 'OpenAI' : 'OpenAI-compatible';
+    return '$provider · ${settings.model}';
+  }
+
+  String _userInitials(String? name, String? email) {
+    final source = (name != null && name.trim().isNotEmpty)
+        ? name.trim()
+        : (email ?? '').trim();
+    if (source.isEmpty) {
+      return 'AI';
+    }
+    final parts = source.split(RegExp(r'\s+'));
+    if (parts.length == 1) {
+      return parts.first.substring(0, parts.first.length >= 2 ? 2 : 1).toUpperCase();
+    }
+    return '${parts.first.substring(0, 1)}${parts.last.substring(0, 1)}'
+        .toUpperCase();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: Listenable.merge(
+        <Listenable>[
+          _recordingsController,
+          _chatController,
+          _audioPlayerController,
+          widget.authController,
+        ],
+      ),
+      builder: (context, _) {
+        final isDesktopLayout = _useDesktopDashboardLayout(context);
+        return Scaffold(
+          backgroundColor: const Color(0xFF090B10),
+          extendBody: !isDesktopLayout,
+          body: SafeArea(
+            child: _buildDashboardShell(isDesktopLayout: isDesktopLayout),
+          ),
+          floatingActionButtonLocation: isDesktopLayout
+              ? FloatingActionButtonLocation.endFloat
+              : FloatingActionButtonLocation.centerDocked,
+          floatingActionButton:
+              isDesktopLayout ? null : _buildCentralCreateButton(),
+          bottomNavigationBar:
+              isDesktopLayout ? null : _buildBottomNavigationBar(),
+        );
+      },
+    );
+  }
+
+  bool _useDesktopDashboardLayout(BuildContext context) =>
+      MediaQuery.sizeOf(context).width >= 1180;
+
+  Widget _buildDashboardShell({required bool isDesktopLayout}) {
+    return Stack(
+      children: <Widget>[
+        Positioned.fill(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: <Color>[
+                  const Color(0xFF0A0C11),
+                  const Color(0xFF0B0E14),
+                  const Color(0xFF11141D).withValues(alpha: 0.92),
+                ],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
               ),
-              onSubmitted: (_) => _createRecording(),
             ),
-            const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: _recordingsController.isListLoading ||
-                        _isLiveRecordingLocked
-                    ? null
-                    : _createRecording,
-                icon: const Icon(Icons.add),
-                label: const Text('Criar gravacao'),
+          ),
+        ),
+        Positioned(
+          top: -120,
+          right: -80,
+          child: Container(
+            width: 240,
+            height: 240,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: RadialGradient(
+                colors: <Color>[
+                  const Color(0xFF5B7CFF).withValues(alpha: 0.24),
+                  Colors.transparent,
+                ],
               ),
             ),
-            const SizedBox(height: 10),
-            Row(
+          ),
+        ),
+        Positioned(
+          top: 120,
+          left: -100,
+          child: Container(
+            width: 220,
+            height: 220,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: RadialGradient(
+                colors: <Color>[
+                  const Color(0xFFFF7A59).withValues(alpha: 0.14),
+                  Colors.transparent,
+                ],
+              ),
+            ),
+          ),
+        ),
+        Positioned.fill(
+          child: isDesktopLayout
+              ? _buildDesktopDashboardShell()
+              : _buildMobileDashboardShell(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMobileDashboardShell() {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 760),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 280),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            child:
+                _currentTabIndex == 0 ? _buildHomeTab() : _buildProfileTab(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDesktopDashboardShell() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(28, 22, 28, 22),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1500),
+          child: SizedBox(
+            height: double.infinity,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                Text(
-                  'Gravacoes (${recordings.length})',
-                  style: Theme.of(context).textTheme.titleMedium,
+                SizedBox(
+                  width: 112,
+                  child: _buildDesktopNavigationRail(),
                 ),
-                const Spacer(),
-                IconButton(
-                  tooltip: 'Atualizar lista',
-                  onPressed: _recordingsController.isListLoading ||
-                          _isLiveRecordingLocked
-                      ? null
-                      : () async {
-                          final token = widget.authController.accessToken;
-                          if (token == null) {
-                            return;
-                          }
-                          try {
-                            await _recordingsController.refreshRecordings(
-                                accessToken: token);
-                          } on ApiException catch (error) {
-                            _showMessage(error.message);
-                          }
-                        },
-                  icon: const Icon(Icons.refresh),
+                const SizedBox(width: 24),
+                SizedBox(
+                  width: 440,
+                  child: _buildDesktopMainPanel(),
+                ),
+                const SizedBox(width: 24),
+                Expanded(
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 240),
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeInCubic,
+                    child: _currentTabIndex == 0
+                        ? _buildDesktopWorkspacePanel()
+                        : _buildDesktopProfileAside(),
+                  ),
                 ),
               ],
             ),
-            const Divider(height: 12),
-            Expanded(
-              child: _recordingsController.isListLoading && recordings.isEmpty
-                  ? const Center(child: CircularProgressIndicator())
-                  : recordings.isEmpty
-                      ? const Center(
-                          child: Text('Nenhuma gravacao criada ainda.'))
-                      : ListView.builder(
-                          itemCount: recordings.length,
-                          itemBuilder: (context, index) {
-                            final recording = recordings[index];
-                            final isSelected =
-                                _recordingsController.selected?.id ==
-                                    recording.id;
-                            return Card(
-                              color:
-                                  isSelected ? const Color(0xFFE2F2EE) : null,
-                              child: ListTile(
-                                selected: isSelected,
-                                title: Text(recording.title),
-                                subtitle: Text('Status: ${recording.status}'),
-                                onTap: _isLiveRecordingLocked
-                                    ? null
-                                    : () => _selectRecording(recording),
-                              ),
-                            );
-                          },
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDesktopNavigationRail() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
+      decoration: BoxDecoration(
+        color: const Color(0xFF11151C),
+        borderRadius: BorderRadius.circular(34),
+        border: Border.all(color: const Color(0xFF242A33)),
+        boxShadow: const <BoxShadow>[
+          BoxShadow(
+            color: Color(0x33000000),
+            blurRadius: 24,
+            offset: Offset(0, 14),
+          ),
+        ],
+      ),
+      child: Column(
+        children: <Widget>[
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              gradient: const LinearGradient(
+                colors: <Color>[
+                  Color(0xFF5B7CFF),
+                  Color(0xFF8B5CFF),
+                ],
+              ),
+            ),
+            alignment: Alignment.center,
+            child: const Text(
+              'AI',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                fontSize: 18,
+              ),
+            ),
+          ),
+          const SizedBox(height: 22),
+          _buildDesktopRailButton(
+            index: 0,
+            icon: Icons.home_rounded,
+            label: 'Home',
+          ),
+          const SizedBox(height: 12),
+          _buildDesktopRailButton(
+            index: 1,
+            icon: Icons.person_rounded,
+            label: 'Usuario',
+          ),
+          const Spacer(),
+          InkWell(
+            onTap: _openCreateRecordingSheet,
+            borderRadius: BorderRadius.circular(26),
+            child: Ink(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: <Color>[
+                    Color(0xFF5B7CFF),
+                    Color(0xFF8B5CFF),
+                  ],
+                ),
+                borderRadius: BorderRadius.circular(26),
+                boxShadow: const <BoxShadow>[
+                  BoxShadow(
+                    color: Color(0x555B7CFF),
+                    blurRadius: 20,
+                    offset: Offset(0, 10),
+                  ),
+                ],
+              ),
+              child: const Column(
+                children: <Widget>[
+                  Icon(Icons.add_rounded, color: Colors.white, size: 30),
+                  SizedBox(height: 6),
+                  Text(
+                    'Criar',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDesktopRailButton({
+    required int index,
+    required IconData icon,
+    required String label,
+  }) {
+    final active = _currentTabIndex == index;
+    return InkWell(
+      borderRadius: BorderRadius.circular(24),
+      onTap: () {
+        setState(() {
+          _currentTabIndex = index;
+        });
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
+        decoration: BoxDecoration(
+          color: active ? const Color(0xFF1A2030) : Colors.transparent,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(
+            color: active
+                ? const Color(0xFF364152)
+                : Colors.transparent,
+          ),
+        ),
+        child: Column(
+          children: <Widget>[
+            Icon(
+              icon,
+              size: 28,
+              color: active ? Colors.white : const Color(0xFF667085),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              style: TextStyle(
+                color: active ? Colors.white : const Color(0xFF667085),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDesktopMainPanel() {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF10151D),
+        borderRadius: BorderRadius.circular(36),
+        border: Border.all(color: const Color(0xFF242A33)),
+        boxShadow: const <BoxShadow>[
+          BoxShadow(
+            color: Color(0x33000000),
+            blurRadius: 28,
+            offset: Offset(0, 16),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(26, 24, 26, 24),
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 280),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          child: _currentTabIndex == 0 ? _buildHomeTab() : _buildProfileTab(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDesktopWorkspacePanel() {
+    final selected = _recordingsController.selected;
+    if (selected == null) {
+      return _buildDesktopEmptyWorkspaceState();
+    }
+
+    return Container(
+      key: ValueKey('workspace-${selected.id}'),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF2F4F7),
+        borderRadius: BorderRadius.circular(36),
+        boxShadow: const <BoxShadow>[
+          BoxShadow(
+            color: Color(0x29000000),
+            blurRadius: 28,
+            offset: Offset(0, 18),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(36),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: _buildDetailPanel(selected),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDesktopEmptyWorkspaceState() {
+    return Container(
+      key: const ValueKey('workspace-empty'),
+      decoration: BoxDecoration(
+        color: const Color(0xFF10151D),
+        borderRadius: BorderRadius.circular(36),
+        border: Border.all(color: const Color(0xFF242A33)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(34),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Container(
+              width: 66,
+              height: 66,
+              decoration: BoxDecoration(
+                color: const Color(0xFF5B7CFF).withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(22),
+              ),
+              alignment: Alignment.center,
+              child: const Icon(
+                Icons.library_music_rounded,
+                color: Color(0xFF89A2FF),
+                size: 34,
+              ),
+            ),
+            const SizedBox(height: 22),
+            const Text(
+              'Workspace da gravacao',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 30,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -1,
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'Na web, a gravacao selecionada fica fixa aqui. Abra um item da lista para ver player, transcricao, resumo, mapa mental e chat sem trocar de tela.',
+              style: TextStyle(
+                color: Color(0xFFA8B1BE),
+                height: 1.55,
+                fontSize: 15,
+              ),
+            ),
+            const SizedBox(height: 26),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: const <Widget>[
+                _InfoChip(
+                  label: 'Player sincronizado',
+                  icon: Icons.play_circle_outline_rounded,
+                  color: Color(0xFF344054),
+                ),
+                _InfoChip(
+                  label: 'Chat por gravacao',
+                  icon: Icons.chat_bubble_outline_rounded,
+                  color: Color(0xFF344054),
+                ),
+                _InfoChip(
+                  label: 'Mapa mental interativo',
+                  icon: Icons.account_tree_outlined,
+                  color: Color(0xFF344054),
+                ),
+              ],
+            ),
+            const Spacer(),
+            InkWell(
+              onTap: _openCreateRecordingSheet,
+              borderRadius: BorderRadius.circular(28),
+              child: Ink(
+                padding: const EdgeInsets.all(22),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: <Color>[
+                      const Color(0xFF18202B),
+                      const Color(0xFF121720),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(28),
+                  border: Border.all(color: const Color(0xFF252B34)),
+                ),
+                child: const Row(
+                  children: <Widget>[
+                    Icon(Icons.add_circle_outline_rounded, color: Colors.white),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Criar uma nova gravacao ou enviar um audio pronto',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
                         ),
+                      ),
+                    ),
+                    Icon(
+                      Icons.arrow_forward_ios_rounded,
+                      size: 16,
+                      color: Color(0xFF98A2B3),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDesktopProfileAside() {
+    final user = widget.authController.currentUser;
+    final total = _recordingsController.recordings.length;
+    final ready = _recordingsController.recordings
+        .where((item) => item.status == 'ready')
+        .length;
+
+    return Container(
+      key: const ValueKey('profile-aside'),
+      decoration: BoxDecoration(
+        color: const Color(0xFF10151D),
+        borderRadius: BorderRadius.circular(36),
+        border: Border.all(color: const Color(0xFF242A33)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(30),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Container(
+                  width: 74,
+                  height: 74,
+                  alignment: Alignment.center,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      colors: <Color>[
+                        Color(0xFF5B7CFF),
+                        Color(0xFF8A5BFF),
+                      ],
+                    ),
+                  ),
+                  child: Text(
+                    _userInitials(user?.name, user?.email),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 24,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 18),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        user?.name?.trim().isNotEmpty == true
+                            ? user!.name!
+                            : 'Usuario',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 28,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.8,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        user?.email ?? '',
+                        style: const TextStyle(
+                          color: Color(0xFFA8B1BE),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 26),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: <Widget>[
+                _InfoChip(
+                  label: '$total gravacoes',
+                  icon: Icons.folder_copy_outlined,
+                  color: const Color(0xFF344054),
+                ),
+                _InfoChip(
+                  label: '$ready prontas',
+                  icon: Icons.check_circle_outline_rounded,
+                  color: const Color(0xFF23B26D),
+                ),
+                _InfoChip(
+                  label: _profileAiSummary(),
+                  icon: Icons.auto_awesome_rounded,
+                  color: const Color(0xFF344054),
+                ),
+              ],
+            ),
+            const SizedBox(height: 28),
+            Container(
+              padding: const EdgeInsets.all(22),
+              decoration: BoxDecoration(
+                color: const Color(0xFF151B24),
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(color: const Color(0xFF252B34)),
+              ),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Versao web adaptada',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 22,
+                    ),
+                  ),
+                  SizedBox(height: 10),
+                  Text(
+                    'A lista principal fica em uma coluna dedicada e o detalhe da gravacao aparece ao lado. O objetivo aqui e reduzir cliques sem abandonar a linguagem visual do mobile.',
+                    style: TextStyle(
+                      color: Color(0xFFA8B1BE),
+                      height: 1.55,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Spacer(),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(22),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: <Color>[
+                    Color(0xFF1D2332),
+                    Color(0xFF151B27),
+                  ],
+                ),
+                borderRadius: BorderRadius.circular(30),
+                border: Border.all(color: const Color(0xFF2C3441)),
+              ),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Fluxo atual',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  SizedBox(height: 10),
+                  Text(
+                    'Home para operar as gravacoes.\nUsuario para IA, conta e preferencias.\nCriar para upload ou gravacao ao vivo.',
+                    style: TextStyle(
+                      color: Color(0xFFD0D5DD),
+                      height: 1.6,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHomeTab() {
+    final groups = _groupedRecordings;
+    final isLoading =
+        _recordingsController.isListLoading && _recordingsController.recordings.isEmpty;
+
+    return Column(
+      key: const ValueKey('home-tab'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'AnotaAi',
+                    style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -1.6,
+                        ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Gravacoes agrupadas por dia, com acesso rapido ao workspace.',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: const Color(0xFFA8B1BE),
+                        ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            FilledButton.tonalIcon(
+              onPressed: _recordingsController.isListLoading
+                  ? null
+                  : () async {
+                      final token = widget.authController.accessToken;
+                      if (token == null) {
+                        return;
+                      }
+                      try {
+                        await _recordingsController.refreshRecordings(
+                          accessToken: token,
+                        );
+                      } on ApiException catch (error) {
+                        _showMessage(error.message);
+                      }
+                    },
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Atualizar'),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF161A21),
+                foregroundColor: Colors.white,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 22),
+        SizedBox(
+          height: 52,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            children: <Widget>[
+              _buildFilterChip(label: 'Todos', value: 'all'),
+              _buildFilterChip(label: 'Prontas', value: 'ready'),
+              _buildFilterChip(label: 'Processando', value: 'processing'),
+              _buildFilterChip(label: 'Falhas', value: 'failed'),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFF141922),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: const Color(0xFF232935)),
+            boxShadow: const <BoxShadow>[
+              BoxShadow(
+                color: Color(0x22000000),
+                blurRadius: 20,
+                offset: Offset(0, 10),
+              ),
+            ],
+          ),
+          child: Row(
+            children: <Widget>[
+              const Icon(Icons.search_rounded, color: Color(0xFF8892A0)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  controller: _homeSearchController,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(
+                    border: InputBorder.none,
+                    hintText: 'Pesquisar gravacoes',
+                    hintStyle: TextStyle(color: Color(0xFF667085)),
+                  ),
+                  onChanged: (value) {
+                    setState(() {
+                      _searchQuery = value;
+                    });
+                  },
+                ),
+              ),
+              IconButton(
+                tooltip: 'Limpar busca',
+                onPressed: _searchQuery.trim().isEmpty
+                    ? null
+                    : () {
+                        _homeSearchController.clear();
+                        setState(() {
+                          _searchQuery = '';
+                        });
+                      },
+                icon: const Icon(
+                  Icons.close_rounded,
+                  color: Color(0xFF8892A0),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+        if (_isLiveRecording || _pendingRecordedAudio != null) ...<Widget>[
+          _buildCompactLiveBanner(),
+          const SizedBox(height: 18),
+        ],
+        Expanded(
+          child: isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : groups.isEmpty
+                  ? _buildEmptyHomeState()
+                  : ListView.separated(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      itemCount: groups.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 22),
+                      itemBuilder: (context, index) {
+                        final group = groups[index];
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Text(
+                              _formatDayHeader(group.day),
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleLarge
+                                  ?.copyWith(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                            ),
+                            const SizedBox(height: 12),
+                            ...group.items.map(_buildRecordingListCard),
+                          ],
+                        );
+                      },
+                    ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCompactLiveBanner() {
+    final label = _pendingRecordedAudio != null
+        ? 'Audio pronto para enviar'
+        : _isLiveRecordingPaused
+            ? 'Gravacao pausada'
+            : 'Gravacao em andamento';
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: <Color>[
+            const Color(0xFF181D27),
+            const Color(0xFF161B24),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: const Color(0xFF2A313C)),
+      ),
+      child: Row(
+        children: <Widget>[
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: const Color(0xFF5B7CFF).withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: const Icon(Icons.mic_rounded, color: Color(0xFF7E95FF)),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _pendingRecordedAudio != null
+                      ? 'Voce pode enviar novamente ou descartar no workspace.'
+                      : 'Tempo atual ${_formatRecordingElapsed(_liveRecordingElapsed)}',
+                  style: const TextStyle(
+                    color: Color(0xFFAAB3C2),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              final selected = _recordingsController.selected;
+              if (selected != null) {
+                _openRecordingWorkspace(selected);
+              }
+            },
+            child: const Text('Abrir'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyHomeState() {
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.all(28),
+        decoration: BoxDecoration(
+          color: const Color(0xFF12161C),
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(color: const Color(0xFF252B34)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: const Color(0xFF5B7CFF).withValues(alpha: 0.14),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.graphic_eq_rounded,
+                size: 34,
+                color: Color(0xFF8EA1FF),
+              ),
+            ),
+            const SizedBox(height: 18),
+            const Text(
+              'Nenhuma gravacao encontrada',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Use o botao central para gravar algo novo ou enviar um audio ja existente.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Color(0xFFA8B1BE),
+                height: 1.5,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFilterChip({
+    required String label,
+    required String value,
+  }) {
+    final active = _recordingFilter == value;
+    return Padding(
+      padding: const EdgeInsets.only(right: 12),
+      child: GestureDetector(
+        onTap: () {
+          setState(() {
+            _recordingFilter = value;
+          });
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+          decoration: BoxDecoration(
+            color: active ? Colors.white : const Color(0xFF151922),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: active
+                  ? Colors.white
+                  : const Color(0xFF252B34),
+            ),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: active ? const Color(0xFF111318) : Colors.white,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRecordingListCard(RecordingModel recording) {
+    final isSelected = _recordingsController.selected?.id == recording.id;
+    final statusColor = switch (recording.status) {
+      'ready' => const Color(0xFF23B26D),
+      'processing' => const Color(0xFFF5B944),
+      'failed' => const Color(0xFFF97066),
+      _ => const Color(0xFF98A2B3),
+    };
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(28),
+          onTap: () => _openRecordingWorkspace(recording),
+          child: Ink(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? const Color(0xFF1B2230)
+                  : const Color(0xFF141922),
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(
+                color: isSelected
+                    ? const Color(0xFF4A65F6)
+                    : const Color(0xFF252B34),
+              ),
+              boxShadow: const <BoxShadow>[
+                BoxShadow(
+                  color: Color(0x22000000),
+                  blurRadius: 18,
+                  offset: Offset(0, 10),
+                ),
+              ],
+            ),
+            child: Row(
+              children: <Widget>[
+                Container(
+                  width: 62,
+                  height: 62,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: <Color>[
+                        const Color(0xFF202635),
+                        const Color(0xFF1A1E28),
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    _recordingEmoji(recording),
+                    style: const TextStyle(fontSize: 32),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        recording.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _formatRecordingMeta(recording),
+                        style: const TextStyle(
+                          color: Color(0xFF8A93A2),
+                          fontSize: 14,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: <Widget>[
+                          Container(
+                            width: 9,
+                            height: 9,
+                            decoration: BoxDecoration(
+                              color: statusColor,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            recording.status,
+                            style: TextStyle(
+                              color: statusColor,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  onPressed: () => _showRecordingActions(recording),
+                  icon: const Icon(
+                    Icons.more_horiz_rounded,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProfileTab() {
+    final user = widget.authController.currentUser;
+    final total = _recordingsController.recordings.length;
+    final ready = _recordingsController.recordings
+        .where((item) => item.status == 'ready')
+        .length;
+    final processing = _recordingsController.recordings
+        .where((item) => item.status == 'processing')
+        .length;
+
+    return SingleChildScrollView(
+      key: const ValueKey('profile-tab'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Text(
+            'Perfil',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 34,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -1.4,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Informacoes da conta, configuracao da IA e atalhos da sessao.',
+            style: TextStyle(
+              color: Color(0xFFA8B1BE),
+              height: 1.5,
+            ),
+          ),
+          const SizedBox(height: 22),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(22),
+            decoration: BoxDecoration(
+              color: const Color(0xFF141922),
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(color: const Color(0xFF252B34)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    Container(
+                      width: 64,
+                      height: 64,
+                      alignment: Alignment.center,
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          colors: <Color>[
+                            Color(0xFF5B7CFF),
+                            Color(0xFF8A5BFF),
+                          ],
+                        ),
+                      ),
+                      child: Text(
+                        _userInitials(user?.name, user?.email),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 22,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            user?.name?.trim().isNotEmpty == true
+                                ? user!.name!
+                                : 'Sem nome definido',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 24,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            user?.email ?? '',
+                            style: const TextStyle(
+                              color: Color(0xFFA8B1BE),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: <Widget>[
+                    _InfoChip(
+                      label: '$total gravacoes',
+                      icon: Icons.folder_copy_outlined,
+                      color: const Color(0xFF344054),
+                    ),
+                    _InfoChip(
+                      label: '$ready prontas',
+                      icon: Icons.check_circle_outline_rounded,
+                      color: const Color(0xFF23B26D),
+                    ),
+                    _InfoChip(
+                      label: '$processing processando',
+                      icon: Icons.sync_rounded,
+                      color: const Color(0xFFF5B944),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 18),
+          _buildProfileSection(
+            title: 'IA do usuario',
+            subtitle: _profileAiSummary(),
+            child: Column(
+              children: <Widget>[
+                _buildProfileActionButton(
+                  icon: Icons.tune_rounded,
+                  title: 'Configurar IA',
+                  subtitle:
+                      'OpenAI oficial ou provider OpenAI-compatible com chave propria.',
+                  onTap: _editAiSettings,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 18),
+          _buildProfileSection(
+            title: 'Conta e opcoes',
+            subtitle: 'Ajustes pessoais e comandos administrativos.',
+            child: Column(
+              children: <Widget>[
+                _buildProfileActionButton(
+                  icon: Icons.badge_outlined,
+                  title: 'Editar nome',
+                  subtitle: 'Atualiza como seu nome aparece na dashboard.',
+                  onTap: _editProfileName,
+                ),
+                const SizedBox(height: 10),
+                _buildProfileActionButton(
+                  icon: Icons.refresh_rounded,
+                  title: 'Atualizar gravacoes',
+                  subtitle: 'Busca a lista mais recente da API.',
+                  onTap: () async {
+                    final token = widget.authController.accessToken;
+                    if (token == null) {
+                      return;
+                    }
+                    try {
+                      await _recordingsController.refreshRecordings(
+                        accessToken: token,
+                      );
+                    } on ApiException catch (error) {
+                      _showMessage(error.message);
+                    }
+                  },
+                ),
+                const SizedBox(height: 10),
+                _buildProfileActionButton(
+                  icon: Icons.logout_rounded,
+                  title: 'Sair',
+                  subtitle: 'Encerra a sessao atual neste navegador.',
+                  onTap: _logout,
+                  destructive: true,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProfileSection({
+    required String title,
+    required String subtitle,
+    required Widget child,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF141922),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: const Color(0xFF252B34)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            title,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            subtitle,
+            style: const TextStyle(
+              color: Color(0xFFA8B1BE),
+              height: 1.45,
+            ),
+          ),
+          const SizedBox(height: 16),
+          child,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProfileActionButton({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+    bool destructive = false,
+  }) {
+    final titleColor =
+        destructive ? const Color(0xFFFF8B82) : Colors.white;
+    final iconColor =
+        destructive ? const Color(0xFFFF8B82) : const Color(0xFF89A2FF);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(22),
+        child: Ink(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFF181D25),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: const Color(0xFF292F39)),
+          ),
+          child: Row(
+            children: <Widget>[
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: iconColor.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(icon, color: iconColor),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: titleColor,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        color: Color(0xFFA8B1BE),
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(
+                Icons.arrow_forward_ios_rounded,
+                size: 16,
+                color: Color(0xFF7C8694),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCentralCreateButton() {
+    return SizedBox(
+      width: 84,
+      height: 84,
+      child: FloatingActionButton(
+        heroTag: 'dashboard-create',
+        elevation: 10,
+        backgroundColor: Colors.transparent,
+        onPressed: _openCreateRecordingSheet,
+        shape: const CircleBorder(),
+        child: Ink(
+          decoration: const BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: LinearGradient(
+              colors: <Color>[
+                Color(0xFF5B7CFF),
+                Color(0xFF8B5CFF),
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+          child: const Center(
+            child: Icon(Icons.add_rounded, size: 40, color: Colors.white),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBottomNavigationBar() {
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+        child: SizedBox(
+          height: 82,
+          child: Row(
+            children: <Widget>[
+              Expanded(
+                child: _buildBottomNavIsland(
+                  child: _buildNavButton(
+                    index: 0,
+                    icon: Icons.home_rounded,
+                    label: 'Inicio',
+                  ),
+                ),
+              ),
+              const SizedBox(width: 106),
+              Expanded(
+                child: _buildBottomNavIsland(
+                  child: _buildNavButton(
+                    index: 1,
+                    icon: Icons.person_rounded,
+                    label: 'Usuario',
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBottomNavIsland({required Widget child}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF151922).withValues(alpha: 0.94),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: const Color(0xFF242A33)),
+        boxShadow: const <BoxShadow>[
+          BoxShadow(
+            color: Color(0x33000000),
+            blurRadius: 20,
+            offset: Offset(0, 12),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+
+  Widget _buildNavButton({
+    required int index,
+    required IconData icon,
+    required String label,
+  }) {
+    final active = _currentTabIndex == index;
+    return InkWell(
+      borderRadius: BorderRadius.circular(22),
+      onTap: () {
+        setState(() {
+          _currentTabIndex = index;
+        });
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            Icon(
+              icon,
+              size: 30,
+              color: active ? Colors.white : const Color(0xFF6E7685),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              style: TextStyle(
+                color: active ? Colors.white : const Color(0xFF6E7685),
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ],
         ),
@@ -2055,6 +3776,241 @@ class _DashboardPageState extends State<DashboardPage> {
       return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
     }
     return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  }
+}
+
+enum _QuickCreateMode { liveRecording, uploadFile }
+
+enum _RecordingAction { open, process, edit, delete }
+
+class _QuickCreateChoice {
+  const _QuickCreateChoice({
+    required this.mode,
+    required this.title,
+  });
+
+  final _QuickCreateMode mode;
+  final String title;
+}
+
+class _RecordingGroup {
+  const _RecordingGroup({
+    required this.day,
+    required this.items,
+  });
+
+  final DateTime day;
+  final List<RecordingModel> items;
+}
+
+class _QuickCreateSheet extends StatefulWidget {
+  const _QuickCreateSheet();
+
+  @override
+  State<_QuickCreateSheet> createState() => _QuickCreateSheetState();
+}
+
+class _QuickCreateSheetState extends State<_QuickCreateSheet> {
+  late final TextEditingController _titleController;
+
+  @override
+  void initState() {
+    super.initState();
+    _titleController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    super.dispose();
+  }
+
+  void _finish(_QuickCreateMode mode) {
+    Navigator.of(context).pop(
+      _QuickCreateChoice(
+        mode: mode,
+        title: _titleController.text.trim(),
+      ),
+    );
+  }
+
+  Widget _buildOptionTile({
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(22),
+        child: Ink(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: const Color(0xFF181D25),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: const Color(0xFF2A303B)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: iconColor.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(icon, color: iconColor),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 17,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        color: Color(0xFFA4ADBA),
+                        height: 1.45,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Icon(
+                Icons.arrow_forward_ios_rounded,
+                size: 16,
+                color: Color(0xFF7C8694),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 16,
+        right: 16,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 18,
+        top: 24,
+      ),
+      child: Container(
+        padding: const EdgeInsets.all(22),
+        decoration: BoxDecoration(
+          color: const Color(0xFF12161C),
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(color: const Color(0xFF262B33)),
+          boxShadow: const <BoxShadow>[
+            BoxShadow(
+              color: Color(0x44000000),
+              blurRadius: 32,
+              offset: Offset(0, 18),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Center(
+              child: Container(
+                width: 44,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF303743),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            const Text(
+              'Nova gravacao',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 24,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Escolha como voce quer capturar o conteudo. Se nao informar titulo, o app gera um automaticamente.',
+              style: TextStyle(
+                color: Color(0xFFA4ADBA),
+                height: 1.5,
+              ),
+            ),
+            const SizedBox(height: 18),
+            TextField(
+              controller: _titleController,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                labelText: 'Titulo da gravacao',
+                labelStyle: const TextStyle(color: Color(0xFF8D98A7)),
+                hintText: 'Ex.: Aula de microbiologia',
+                hintStyle: const TextStyle(color: Color(0xFF5E6774)),
+                filled: true,
+                fillColor: const Color(0xFF171C23),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(18),
+                  borderSide: const BorderSide(color: Color(0xFF2A313C)),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(18),
+                  borderSide: const BorderSide(color: Color(0xFF2A313C)),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(18),
+                  borderSide: const BorderSide(color: Color(0xFF5B7CFF)),
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            _buildOptionTile(
+              icon: Icons.mic_rounded,
+              iconColor: const Color(0xFFFF7758),
+              title: 'Gravar direto',
+              subtitle:
+                  'Abre a gravacao ao vivo, com pausar, continuar e envio automatico no final.',
+              onTap: () => _finish(_QuickCreateMode.liveRecording),
+            ),
+            const SizedBox(height: 12),
+            _buildOptionTile(
+              icon: Icons.audio_file_rounded,
+              iconColor: const Color(0xFF5B7CFF),
+              title: 'Usar arquivo pronto',
+              subtitle:
+                  'Seleciona um audio ja gravado, envia para a VPS e processa automaticamente.',
+              onTap: () => _finish(_QuickCreateMode.uploadFile),
+            ),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancelar'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

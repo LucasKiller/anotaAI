@@ -79,13 +79,17 @@ class RecordingsController extends ChangeNotifier {
   Future<void> createRecording({
     required String accessToken,
     required String title,
+    String sourceType = 'upload',
   }) async {
     _setListLoading(true);
     _setError(null);
 
     try {
       final created = await _service.createRecording(
-          accessToken: accessToken, title: title);
+        accessToken: accessToken,
+        title: title,
+        sourceType: sourceType,
+      );
       _recordings = <RecordingModel>[created, ..._recordings];
       _selected = created;
       notifyListeners();
