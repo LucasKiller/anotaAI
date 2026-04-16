@@ -35,6 +35,10 @@ class ChatMessageModel {
     required this.content,
     required this.citationsJson,
     required this.createdAt,
+    this.isPending = false,
+    this.isThinking = false,
+    this.animateTyping = false,
+    this.isLocalOnly = false,
   });
 
   final String id;
@@ -43,9 +47,39 @@ class ChatMessageModel {
   final String content;
   final Object? citationsJson;
   final DateTime createdAt;
+  final bool isPending;
+  final bool isThinking;
+  final bool animateTyping;
+  final bool isLocalOnly;
 
   bool get isAssistant => role == 'assistant';
   bool get isUser => role == 'user';
+
+  ChatMessageModel copyWith({
+    String? id,
+    String? chatSessionId,
+    String? role,
+    String? content,
+    Object? citationsJson,
+    DateTime? createdAt,
+    bool? isPending,
+    bool? isThinking,
+    bool? animateTyping,
+    bool? isLocalOnly,
+  }) {
+    return ChatMessageModel(
+      id: id ?? this.id,
+      chatSessionId: chatSessionId ?? this.chatSessionId,
+      role: role ?? this.role,
+      content: content ?? this.content,
+      citationsJson: citationsJson ?? this.citationsJson,
+      createdAt: createdAt ?? this.createdAt,
+      isPending: isPending ?? this.isPending,
+      isThinking: isThinking ?? this.isThinking,
+      animateTyping: animateTyping ?? this.animateTyping,
+      isLocalOnly: isLocalOnly ?? this.isLocalOnly,
+    );
+  }
 
   factory ChatMessageModel.fromJson(Map<String, dynamic> json) {
     return ChatMessageModel(
@@ -55,6 +89,39 @@ class ChatMessageModel {
       content: json['content'] as String,
       citationsJson: json['citations_json'],
       createdAt: DateTime.parse(json['created_at'] as String),
+    );
+  }
+
+  factory ChatMessageModel.optimisticUser({
+    required String tempId,
+    required String chatSessionId,
+    required String content,
+  }) {
+    return ChatMessageModel(
+      id: tempId,
+      chatSessionId: chatSessionId,
+      role: 'user',
+      content: content,
+      citationsJson: null,
+      createdAt: DateTime.now(),
+      isPending: true,
+      isLocalOnly: true,
+    );
+  }
+
+  factory ChatMessageModel.thinkingAssistant({
+    required String tempId,
+    required String chatSessionId,
+  }) {
+    return ChatMessageModel(
+      id: tempId,
+      chatSessionId: chatSessionId,
+      role: 'assistant',
+      content: '',
+      citationsJson: null,
+      createdAt: DateTime.now(),
+      isThinking: true,
+      isLocalOnly: true,
     );
   }
 }

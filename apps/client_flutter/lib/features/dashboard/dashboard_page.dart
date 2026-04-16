@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
@@ -6,6 +8,7 @@ import '../../core/network/api_client.dart';
 import '../../shared/models/chat_models.dart';
 import '../../shared/models/job_model.dart';
 import '../../shared/models/recording_model.dart';
+import '../../shared/widgets/app_markdown.dart';
 import '../../shared/widgets/content_section.dart';
 import '../../shared/widgets/mindmap_viewer.dart';
 import '../chat/chat_controller.dart';
@@ -23,6 +26,7 @@ class DashboardPage extends StatefulWidget {
 class _DashboardPageState extends State<DashboardPage> {
   final _newRecordingController = TextEditingController();
   final _chatInputController = TextEditingController();
+  final _chatScrollController = ScrollController();
 
   late final RecordingsController _recordingsController;
   late final ChatController _chatController;
@@ -32,6 +36,7 @@ class _DashboardPageState extends State<DashboardPage> {
     super.initState();
     _recordingsController = RecordingsController();
     _chatController = ChatController();
+    _chatController.addListener(_handleChatChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadInitial();
     });
@@ -41,9 +46,40 @@ class _DashboardPageState extends State<DashboardPage> {
   void dispose() {
     _newRecordingController.dispose();
     _chatInputController.dispose();
+    _chatScrollController.dispose();
+    _chatController.removeListener(_handleChatChanged);
     _recordingsController.dispose();
     _chatController.dispose();
     super.dispose();
+  }
+
+  void _handleChatChanged() {
+    _scheduleChatScroll();
+  }
+
+  void _scheduleChatScroll() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _scrollChatToEnd();
+    });
+  }
+
+  void _scrollChatToEnd({bool animated = true}) {
+    if (!_chatScrollController.hasClients) {
+      return;
+    }
+    final position = _chatScrollController.position.maxScrollExtent;
+    if (animated) {
+      _chatScrollController.animateTo(
+        position,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+      );
+      return;
+    }
+    _chatScrollController.jumpTo(position);
   }
 
   Future<void> _loadInitial() async {
@@ -215,6 +251,8 @@ class _DashboardPageState extends State<DashboardPage> {
     if (token == null || selected == null || content.isEmpty) {
       return;
     }
+
+    _chatInputController.clear();
 
     try {
       await _chatController.sendMessage(
@@ -867,8 +905,8 @@ class _DashboardPageState extends State<DashboardPage> {
                     ),
                     ContentSection(
                       title: 'Resumo',
-                      child: SelectableText(
-                        _recordingsController.summary?.contentMd ??
+                      child: AppMarkdown(
+                        data: _recordingsController.summary?.contentMd ??
                             'Ainda sem resumo. Rode o processamento para gerar.',
                       ),
                     ),
@@ -906,15 +944,31 @@ class _DashboardPageState extends State<DashboardPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Container(
-            height: 320,
+            height: 380,
             width: double.infinity,
             decoration: BoxDecoration(
-              color: const Color(0xFFF7F8F5),
-              border: Border.all(color: const Color(0xFFD7D7D1)),
-              borderRadius: BorderRadius.circular(12),
+              gradient: const LinearGradient(
+                colors: <Color>[
+                  Color(0xFF111317),
+                  Color(0xFF171A1F),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              border: Border.all(color: const Color(0xFF242932)),
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: const <BoxShadow>[
+                BoxShadow(
+                  color: Color(0x22000000),
+                  blurRadius: 24,
+                  offset: Offset(0, 12),
+                ),
+              ],
             ),
             child: _chatController.isLoading
-                ? const Center(child: CircularProgressIndicator())
+                ? const Center(
+                    child: CircularProgressIndicator(color: Colors.white),
+                  )
                 : _chatController.messages.isEmpty
                     ? const Center(
                         child: Padding(
@@ -922,10 +976,15 @@ class _DashboardPageState extends State<DashboardPage> {
                           child: Text(
                             'Ainda nao ha mensagens. Pergunte algo sobre a gravacao depois que a transcricao estiver pronta.',
                             textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Color(0xFFB3BBC7),
+                              height: 1.5,
+                            ),
                           ),
                         ),
                       )
                     : ListView.separated(
+                        controller: _chatScrollController,
                         padding: const EdgeInsets.all(12),
                         itemCount: _chatController.messages.length,
                         separatorBuilder: (_, __) => const SizedBox(height: 10),
@@ -952,10 +1011,25 @@ class _DashboardPageState extends State<DashboardPage> {
                   controller: _chatInputController,
                   minLines: 1,
                   maxLines: 4,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Pergunte sobre esta gravacao',
-                    border: OutlineInputBorder(),
+                    labelStyle: const TextStyle(color: Color(0xFF7A8492)),
+                    filled: true,
+                    fillColor: const Color(0xFF15181D),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(18),
+                      borderSide: const BorderSide(color: Color(0xFF2B313A)),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(18),
+                      borderSide: const BorderSide(color: Color(0xFF2B313A)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(18),
+                      borderSide: const BorderSide(color: Color(0xFF377DFF)),
+                    ),
                   ),
+                  style: const TextStyle(color: Color(0xFFF3F6FB)),
                   onSubmitted: (_) => _sendChatMessage(),
                 ),
               ),
@@ -970,13 +1044,24 @@ class _DashboardPageState extends State<DashboardPage> {
                       )
                     : const Icon(Icons.send),
                 label: const Text('Enviar'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF1B67F8),
+                  foregroundColor: Colors.white,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                ),
               ),
             ],
           ),
           const SizedBox(height: 8),
           Text(
             'Sessao: ${_chatController.session?.title ?? 'Chat principal'}',
-            style: Theme.of(context).textTheme.bodySmall,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: const Color(0xFF6A717C),
+                ),
           ),
         ],
       ),
@@ -986,47 +1071,152 @@ class _DashboardPageState extends State<DashboardPage> {
   Widget _buildChatBubble(ChatMessageModel message) {
     final isUser = message.isUser;
     final citations = _citationText(message.citationsJson);
+    final timestamp = _formatDate(message.createdAt);
+    final bubbleColor =
+        isUser ? const Color(0xFF1B67F8) : const Color(0xFF1A1E25);
+    final bubbleBorder =
+        isUser ? const Color(0xFF3D85FF) : const Color(0xFF272D38);
+    final textColor = isUser ? Colors.white : const Color(0xFFF3F6FB);
+    final metaLabelColor =
+        isUser ? const Color(0xFFE7ECFF) : const Color(0xFFD7DCE5);
+    final metaTimeColor =
+        isUser ? const Color(0xFFF1C84C) : const Color(0xFFF1C84C);
 
-    return Align(
-      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+    final bubble = Opacity(
+      opacity: message.isPending ? 0.84 : 1,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 620),
+        constraints: const BoxConstraints(maxWidth: 640),
         child: Container(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           decoration: BoxDecoration(
-            color: isUser ? const Color(0xFF1E6F5C) : const Color(0xFFE6ECE8),
-            borderRadius: BorderRadius.circular(12),
+            color: bubbleColor,
+            border: Border.all(color: bubbleBorder),
+            borderRadius: BorderRadius.circular(22),
+            boxShadow: const <BoxShadow>[
+              BoxShadow(
+                color: Color(0x22000000),
+                blurRadius: 14,
+                offset: Offset(0, 8),
+              ),
+            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              Text(
-                isUser ? 'Voce' : 'Assistente',
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  color: isUser ? Colors.white : const Color(0xFF20443A),
-                ),
-              ),
-              const SizedBox(height: 6),
-              SelectableText(
-                message.content,
-                style: TextStyle(
-                  color: isUser ? Colors.white : const Color(0xFF1D1D1B),
-                ),
-              ),
-              if (citations != null) ...<Widget>[
-                const SizedBox(height: 8),
+              if (message.isThinking)
+                const _ThinkingBubble()
+              else if (message.animateTyping)
+                _TypewriterText(
+                  text: message.content,
+                  style: TextStyle(
+                    color: textColor,
+                    fontSize: 15,
+                    height: 1.55,
+                  ),
+                  onCompleted: () {
+                    _chatController.markMessageAnimationCompleted(message.id);
+                  },
+                  onProgress: () => _scrollChatToEnd(animated: false),
+                )
+              else
+                isUser
+                    ? SelectableText(
+                        message.content,
+                        style: TextStyle(
+                          color: textColor,
+                          fontSize: 15,
+                          height: 1.55,
+                        ),
+                      )
+                    : AppMarkdown(
+                        data: message.content,
+                        dark: true,
+                      ),
+              if (!message.isThinking &&
+                  !message.animateTyping &&
+                  citations != null) ...<Widget>[
+                const SizedBox(height: 10),
                 Text(
                   citations,
                   style: TextStyle(
                     fontSize: 12,
-                    color: isUser ? Colors.white70 : const Color(0xFF5C5E57),
+                    color: isUser
+                        ? const Color(0xFFDCE6FF)
+                        : const Color(0xFF8E98A8),
                   ),
                 ),
               ],
             ],
           ),
         ),
+      ),
+    );
+
+    return Align(
+      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: Column(
+        crossAxisAlignment:
+            isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment:
+                isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+            children: isUser
+                ? <Widget>[
+                    Text(
+                      'Voce',
+                      style: TextStyle(
+                        color: metaLabelColor,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      timestamp,
+                      style: TextStyle(
+                        color: metaTimeColor,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    const _ChatAvatar(
+                      label: 'VO',
+                      backgroundColor: Color(0xFF1554D1),
+                    ),
+                  ]
+                : <Widget>[
+                    const _ChatAvatar(
+                      label: 'IA',
+                      backgroundColor: Color(0xFF6A34D7),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      'IA',
+                      style: TextStyle(
+                        color: metaLabelColor,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      timestamp,
+                      style: TextStyle(
+                        color: metaTimeColor,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+          ),
+          const SizedBox(height: 8),
+          if (isUser)
+            bubble
+          else
+            Padding(
+              padding: const EdgeInsets.only(left: 50),
+              child: bubble,
+            ),
+        ],
       ),
     );
   }
@@ -1090,6 +1280,200 @@ class _DashboardPageState extends State<DashboardPage> {
     final minutes = totalSeconds ~/ 60;
     final seconds = totalSeconds % 60;
     return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  }
+}
+
+class _ChatAvatar extends StatelessWidget {
+  const _ChatAvatar({
+    required this.label,
+    required this.backgroundColor,
+  });
+
+  final String label;
+  final Color backgroundColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 34,
+      height: 34,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: backgroundColor,
+        boxShadow: const <BoxShadow>[
+          BoxShadow(
+            color: Color(0x22000000),
+            blurRadius: 8,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.4,
+        ),
+      ),
+    );
+  }
+}
+
+class _ThinkingBubble extends StatefulWidget {
+  const _ThinkingBubble();
+
+  @override
+  State<_ThinkingBubble> createState() => _ThinkingBubbleState();
+}
+
+class _ThinkingBubbleState extends State<_ThinkingBubble> {
+  Timer? _timer;
+  int _activeIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(milliseconds: 340), (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _activeIndex = (_activeIndex + 1) % 3;
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        for (var index = 0; index < 3; index++) ...<Widget>[
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            width: 9,
+            height: 9,
+            decoration: BoxDecoration(
+              color: index == _activeIndex
+                  ? const Color(0xFFEEF2FA)
+                  : const Color(0xFF434A55),
+              shape: BoxShape.circle,
+            ),
+          ),
+          if (index < 2) const SizedBox(width: 8),
+        ],
+        const SizedBox(width: 12),
+        const Text(
+          'Pensando...',
+          style: TextStyle(
+            color: Color(0xFFAAB3C2),
+            fontSize: 15,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _TypewriterText extends StatefulWidget {
+  const _TypewriterText({
+    required this.text,
+    required this.style,
+    this.onCompleted,
+    this.onProgress,
+  });
+
+  final String text;
+  final TextStyle style;
+  final VoidCallback? onCompleted;
+  final VoidCallback? onProgress;
+
+  @override
+  State<_TypewriterText> createState() => _TypewriterTextState();
+}
+
+class _TypewriterTextState extends State<_TypewriterText> {
+  Timer? _timer;
+  int _visibleCharacters = 0;
+  bool _completed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _startAnimation();
+  }
+
+  @override
+  void didUpdateWidget(covariant _TypewriterText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.text != widget.text) {
+      _startAnimation();
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _startAnimation() {
+    _timer?.cancel();
+    _visibleCharacters = 0;
+    _completed = false;
+
+    if (widget.text.isEmpty) {
+      return;
+    }
+
+    final totalCharacters = widget.text.length;
+    final intervalMs = totalCharacters > 260
+        ? 8
+        : totalCharacters > 140
+            ? 11
+            : 16;
+
+    _timer = Timer.periodic(Duration(milliseconds: intervalMs), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+
+      if (_visibleCharacters >= totalCharacters) {
+        timer.cancel();
+        if (!_completed) {
+          _completed = true;
+          widget.onCompleted?.call();
+        }
+        return;
+      }
+
+      setState(() {
+        _visibleCharacters = (_visibleCharacters + 2).clamp(0, totalCharacters);
+      });
+      widget.onProgress?.call();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final visibleText = widget.text.substring(
+      0,
+      _visibleCharacters.clamp(0, widget.text.length),
+    );
+    return Text(
+      visibleText,
+      style: widget.style,
+    );
   }
 }
 

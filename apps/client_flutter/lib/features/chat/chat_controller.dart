@@ -67,28 +67,75 @@ class ChatController extends ChangeNotifier {
     _setSending(true);
     _setError(null);
 
+    final timestamp = DateTime.now().microsecondsSinceEpoch;
+    final optimisticUser = ChatMessageModel.optimisticUser(
+      tempId: 'local-user-$timestamp',
+      chatSessionId: _session?.id ?? recordingId,
+      content: content,
+    );
+    final thinkingAssistant = ChatMessageModel.thinkingAssistant(
+      tempId: 'local-thinking-$timestamp',
+      chatSessionId: _session?.id ?? recordingId,
+    );
+    _messages = <ChatMessageModel>[
+      ..._messages,
+      optimisticUser,
+      thinkingAssistant,
+    ];
+    notifyListeners();
+
     try {
       final session = await _ensureSession(
         accessToken: accessToken,
         recordingId: recordingId,
+        preserveTransientMessages: true,
       );
       final reply = await _service.sendMessage(
         accessToken: accessToken,
         sessionId: session.id,
         content: content,
       );
+      final remainingMessages = _messages
+          .where((message) =>
+              message.id != optimisticUser.id &&
+              message.id != thinkingAssistant.id)
+          .toList(growable: false);
       _messages = <ChatMessageModel>[
-        ..._messages,
+        ...remainingMessages,
         reply.userMessage,
-        reply.assistantMessage,
+        reply.assistantMessage.copyWith(animateTyping: true),
       ];
       notifyListeners();
     } on ApiException catch (error) {
+      _messages = _messages
+          .where((message) => message.id != thinkingAssistant.id)
+          .map((message) => message.id == optimisticUser.id
+              ? message.copyWith(isPending: false)
+              : message)
+          .toList(growable: false);
+      notifyListeners();
       _setError(error.message);
       rethrow;
     } finally {
       _setSending(false);
     }
+  }
+
+  void markMessageAnimationCompleted(String messageId) {
+    final index = _messages.indexWhere((message) => message.id == messageId);
+    if (index == -1) {
+      return;
+    }
+
+    final message = _messages[index];
+    if (!message.animateTyping) {
+      return;
+    }
+
+    final updatedMessages = List<ChatMessageModel>.from(_messages);
+    updatedMessages[index] = message.copyWith(animateTyping: false);
+    _messages = updatedMessages;
+    notifyListeners();
   }
 
   Future<void> reload({required String accessToken}) async {
@@ -113,10 +160,15 @@ class ChatController extends ChangeNotifier {
   Future<ChatSessionModel> _ensureSession({
     required String accessToken,
     required String recordingId,
+    bool preserveTransientMessages = false,
   }) async {
     if (_session != null && _session!.recordingId == recordingId) {
       return _session!;
     }
+
+    final transientMessages = preserveTransientMessages
+        ? _messages.where((message) => message.isLocalOnly).toList(growable: false)
+        : const <ChatMessageModel>[];
 
     final sessions = await _service.listSessions(
       accessToken: accessToken,
@@ -128,7 +180,10 @@ class ChatController extends ChangeNotifier {
         sessionId: sessions.first.id,
       );
       _session = detail.session;
-      _messages = detail.messages;
+      _messages = <ChatMessageModel>[
+        ...detail.messages,
+        ...transientMessages,
+      ];
       notifyListeners();
       return detail.session;
     }
@@ -139,7 +194,7 @@ class ChatController extends ChangeNotifier {
       title: 'Chat principal',
     );
     _session = created;
-    _messages = <ChatMessageModel>[];
+    _messages = transientMessages;
     notifyListeners();
     return created;
   }
