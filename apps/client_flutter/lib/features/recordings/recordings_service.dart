@@ -15,6 +15,33 @@ class RecordingsService {
 
   final ApiClient _apiClient;
 
+  Future<RecordingAudioData> downloadAudio({
+    required String accessToken,
+    required String recordingId,
+  }) async {
+    final uri = Uri.parse('${_baseUrl()}/recordings/$recordingId/audio');
+    final response = await http.get(
+      uri,
+      headers: <String, String>{
+        'Authorization': 'Bearer $accessToken',
+        'Accept': 'audio/*,application/octet-stream',
+      },
+    );
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return RecordingAudioData(
+        bytes: response.bodyBytes,
+        mimeType: _extractMimeType(response.headers['content-type']),
+        fileName: _extractFilename(response.headers['content-disposition']),
+      );
+    }
+
+    throw ApiException(
+      message: _extractMessage(response.body),
+      statusCode: response.statusCode,
+    );
+  }
+
   Future<List<RecordingModel>> listRecordings(
       {required String accessToken}) async {
     final response = await _apiClient.get('/recordings',
@@ -218,4 +245,39 @@ class RecordingsService {
     }
     return raw;
   }
+
+  String _extractMimeType(String? headerValue) {
+    if (headerValue == null || headerValue.trim().isEmpty) {
+      return 'application/octet-stream';
+    }
+    return headerValue.split(';').first.trim();
+  }
+
+  String? _extractFilename(String? contentDisposition) {
+    if (contentDisposition == null || contentDisposition.trim().isEmpty) {
+      return null;
+    }
+
+    final parts = contentDisposition.split(';');
+    for (final part in parts) {
+      final trimmed = part.trim();
+      if (!trimmed.toLowerCase().startsWith('filename=')) {
+        continue;
+      }
+      return trimmed.substring('filename='.length).replaceAll('"', '');
+    }
+    return null;
+  }
+}
+
+class RecordingAudioData {
+  RecordingAudioData({
+    required this.bytes,
+    required this.mimeType,
+    this.fileName,
+  });
+
+  final List<int> bytes;
+  final String mimeType;
+  final String? fileName;
 }

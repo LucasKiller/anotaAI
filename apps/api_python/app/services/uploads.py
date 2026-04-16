@@ -1,9 +1,20 @@
+from dataclasses import dataclass
+from pathlib import PurePosixPath
+
 from fastapi import UploadFile
 from sqlalchemy.orm import Session
 
 from app.integrations.storage.s3_storage import S3Storage
 from app.models import Recording, RecordingFile
 from app.repositories import RecordingFileRepository
+
+
+@dataclass
+class DownloadedRecordingAudio:
+    content: bytes
+    filename: str
+    mime_type: str
+    size_bytes: int
 
 
 class UploadService:
@@ -36,3 +47,19 @@ class UploadService:
         self.db.commit()
         self.db.refresh(recording_file)
         return recording_file
+
+    def download_latest_audio(self, *, recording: Recording) -> DownloadedRecordingAudio:
+        latest_file = self.files.latest_for_recording(recording.id)
+        if latest_file is None:
+            raise ValueError("Recording does not have an uploaded audio file")
+
+        downloaded = self.storage.download_recording_file(
+            bucket=latest_file.bucket,
+            object_key=latest_file.object_key,
+        )
+        return DownloadedRecordingAudio(
+            content=downloaded.content,
+            filename=PurePosixPath(latest_file.object_key).name,
+            mime_type=latest_file.mime_type or downloaded.content_type or "application/octet-stream",
+            size_bytes=latest_file.size_bytes,
+        )

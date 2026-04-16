@@ -38,8 +38,18 @@ class UploadedObject:
     checksum_sha256: str
 
 
+@dataclass
+class DownloadedObject:
+    content: bytes
+    content_type: str | None
+
+
 class StorageUploadError(Exception):
     """Raised when upload to object storage fails."""
+
+
+class StorageDownloadError(Exception):
+    """Raised when download from object storage fails."""
 
 
 class S3Storage:
@@ -123,4 +133,28 @@ class S3Storage:
             object_key=object_key,
             size_bytes=len(content),
             checksum_sha256=digest,
+        )
+
+    def download_recording_file(self, *, bucket: str, object_key: str) -> DownloadedObject:
+        try:
+            response = self._client.get_object(Bucket=bucket, Key=object_key)
+            body = response["Body"]
+            try:
+                content = body.read()
+            finally:
+                close = getattr(body, "close", None)
+                if callable(close):
+                    close()
+                release_conn = getattr(body, "release_conn", None)
+                if callable(release_conn):
+                    release_conn()
+        except (ClientError, BotoCoreError) as exc:
+            raise StorageDownloadError(
+                "Download from storage failed for "
+                f"endpoint={settings.s3_endpoint} bucket={bucket}: {exc}"
+            ) from exc
+
+        return DownloadedObject(
+            content=content,
+            content_type=response.get("ContentType"),
         )
