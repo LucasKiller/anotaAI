@@ -19,6 +19,7 @@ class RecordingsController extends ChangeNotifier {
   List<RecordingModel> _recordings = <RecordingModel>[];
   RecordingModel? _selected;
   TranscriptModel? _transcript;
+  List<TranscriptSegmentModel> _transcriptSegments = <TranscriptSegmentModel>[];
   ArtifactModel? _summary;
   ArtifactModel? _mindmap;
   List<JobModel> _jobs = <JobModel>[];
@@ -30,6 +31,7 @@ class RecordingsController extends ChangeNotifier {
   List<RecordingModel> get recordings => _recordings;
   RecordingModel? get selected => _selected;
   TranscriptModel? get transcript => _transcript;
+  List<TranscriptSegmentModel> get transcriptSegments => _transcriptSegments;
   ArtifactModel? get summary => _summary;
   ArtifactModel? get mindmap => _mindmap;
   List<JobModel> get jobs => _jobs;
@@ -102,6 +104,7 @@ class RecordingsController extends ChangeNotifier {
   }) async {
     _selected = _findById(recordingId);
     _transcript = null;
+    _transcriptSegments = <TranscriptSegmentModel>[];
     _summary = null;
     _mindmap = null;
     _jobs = <JobModel>[];
@@ -228,6 +231,7 @@ class RecordingsController extends ChangeNotifier {
           _recordings.where((item) => item.id != recordingId).toList();
       _selected = null;
       _transcript = null;
+      _transcriptSegments = <TranscriptSegmentModel>[];
       _summary = null;
       _mindmap = null;
       _jobs = <JobModel>[];
@@ -266,6 +270,8 @@ class RecordingsController extends ChangeNotifier {
     try {
       final transcript = await _service.getTranscript(
           accessToken: accessToken, recordingId: recordingId);
+      final transcriptSegments = await _service.getSegments(
+          accessToken: accessToken, recordingId: recordingId);
       final summary = await _service.getSummary(
           accessToken: accessToken, recordingId: recordingId);
       final mindmap = await _service.getMindmap(
@@ -274,6 +280,7 @@ class RecordingsController extends ChangeNotifier {
           accessToken: accessToken, recordingId: recordingId);
 
       _transcript = transcript;
+      _transcriptSegments = transcriptSegments;
       _summary = summary;
       _mindmap = mindmap;
       _jobs = jobs;

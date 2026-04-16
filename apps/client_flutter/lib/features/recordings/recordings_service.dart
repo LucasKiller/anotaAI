@@ -133,6 +133,26 @@ class RecordingsService {
     }
   }
 
+  Future<List<TranscriptSegmentModel>> getSegments({
+    required String accessToken,
+    required String recordingId,
+  }) async {
+    try {
+      final response = await _apiClient.get(
+        '/recordings/$recordingId/segments',
+        accessToken: accessToken,
+      ) as Map<String, dynamic>;
+      final rawItems = (response['items'] as List<dynamic>? ?? <dynamic>[])
+          .cast<Map<String, dynamic>>();
+      return rawItems.map(TranscriptSegmentModel.fromJson).toList();
+    } on ApiException catch (error) {
+      if (error.statusCode == 404) {
+        return <TranscriptSegmentModel>[];
+      }
+      rethrow;
+    }
+  }
+
   Future<ArtifactModel?> getSummary({
     required String accessToken,
     required String recordingId,

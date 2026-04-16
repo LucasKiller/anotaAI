@@ -7,6 +7,7 @@ import '../../shared/models/chat_models.dart';
 import '../../shared/models/job_model.dart';
 import '../../shared/models/recording_model.dart';
 import '../../shared/widgets/content_section.dart';
+import '../../shared/widgets/mindmap_viewer.dart';
 import '../chat/chat_controller.dart';
 import '../recordings/recordings_controller.dart';
 
@@ -872,23 +873,15 @@ class _DashboardPageState extends State<DashboardPage> {
                       ),
                     ),
                     ContentSection(
-                      title: 'Mapa Mental (JSON)',
-                      child: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF1F1F1F),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: SelectableText(
-                          _recordingsController.mindmap?.prettyJson() ??
-                              'Ainda sem mapa mental. Rode o processamento para gerar.',
-                          style: const TextStyle(
-                            fontFamily: 'Consolas',
-                            fontSize: 13,
-                            color: Color(0xFFEDEDED),
-                          ),
-                        ),
+                      title: 'Mapa Mental',
+                      child: MindmapViewer(
+                        key: ValueKey(_recordingsController.mindmap?.id),
+                        artifact: _recordingsController.mindmap,
+                        transcript: _recordingsController.transcript,
+                        transcriptSegments:
+                            _recordingsController.transcriptSegments,
+                        emptyMessage:
+                            'Ainda sem mapa mental. Rode o processamento para gerar.',
                       ),
                     ),
                     _buildChatSection(selected),
