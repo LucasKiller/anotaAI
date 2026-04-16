@@ -7,13 +7,14 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.integrations.llm.provider_config import resolve_effective_llm_config
 from app.integrations.storage.s3_storage import S3StorageClient
 from app.jobs.artifacts import build_mindmap_json, build_summary_markdown
 from app.jobs.chat_index import update_chat_index_stub
 from app.jobs.embeddings import build_embeddings_stub
 from app.jobs.segmentation import build_segments
 from app.jobs.transcription import transcribe_audio_file
-from app.models import Artifact, ProcessingJob, Recording, RecordingFile, Transcript, TranscriptSegment
+from app.models import Artifact, ProcessingJob, Recording, RecordingFile, Transcript, TranscriptSegment, UserAiSetting
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -73,12 +74,19 @@ class PipelineProcessor:
             self._create_segments(transcript_id=transcript.id, segments_payload=segments_payload)
             build_embeddings_stub(segments_payload)
 
-            summary = build_summary_markdown(recording.title, transcription.full_text, segments_payload)
+            llm_config = resolve_effective_llm_config(self._user_ai_settings(recording.user_id))
+            summary = build_summary_markdown(
+                recording.title,
+                transcription.full_text,
+                segments_payload,
+                llm_config=llm_config,
+            )
             mindmap = build_mindmap_json(
                 recording.title,
                 transcription.full_text,
                 segments_payload,
                 summary.content,
+                llm_config=llm_config,
             )
             self._create_artifact(
                 recording.id,
@@ -128,6 +136,10 @@ class PipelineProcessor:
             .order_by(RecordingFile.uploaded_at.desc())
             .limit(1)
         )
+        return self.db.scalar(stmt)
+
+    def _user_ai_settings(self, user_id: UUID) -> UserAiSetting | None:
+        stmt = select(UserAiSetting).where(UserAiSetting.user_id == user_id)
         return self.db.scalar(stmt)
 
     def _create_transcript(self, *, recording_id: UUID, full_text: str, language: str | None, model_name: str) -> Transcript:

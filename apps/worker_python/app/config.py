@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://anotaai:anotaai@localhost:5432/anotaai"
     redis_url: str = "redis://localhost:6379/0"
     job_queue_key: str = "anotaai:jobs"
+    jwt_secret: str = "change-me-access"
+    ai_settings_encryption_key: str | None = None
 
     s3_endpoint: str = "http://localhost:9000"
     s3_bucket: str = "anotaai-private"

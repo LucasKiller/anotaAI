@@ -138,10 +138,43 @@ set PYTHONPATH=apps\worker_python && python -m app.main
 - Áudios vão para MinIO; metadados ficam no Postgres.
 - O pipeline do worker usa `faster-whisper` para transcrição real quando `TRANSCRIPTION_PROVIDER=local_whisper`.
 - Para transcrição local funcionar, `ffmpeg` precisa estar instalado no host/container do worker.
-- Para resumo, mapa mental e chat via gateway, configure `LLM_PROVIDER=ai_gateway`, `LLM_BASE_URL`, `LLM_API_KEY` e `LLM_MODEL`.
+- Para resumo, mapa mental e chat com provider OpenAI-compatible global, configure `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_API_KEY` e `LLM_MODEL`.
+- Para criptografar com seguranca as chaves de IA dos usuarios, configure `AI_SETTINGS_ENCRYPTION_KEY` com o mesmo valor na API e no worker.
 - O `LLM_BASE_URL` deve apontar para o prefixo do seu gateway, por exemplo `https://api.inovv.co/ai/v1/dev`, pois a aplicação chama `/v1/responses` e `/v1/chat/completions` a partir dele.
 - Os pontos de extensão para Whisper/Ollama estão separados em `apps/worker_python/app/jobs/*`.
 - A API já está organizada com `services`, `repositories` e `integrations`.
+
+## Chave de IA por usuario
+
+Cada usuario pode salvar a propria configuracao de IA e trocar entre:
+
+- `openai`
+- `openai_compatible`
+
+Quando houver configuracao do usuario, ela tem prioridade para:
+
+- resumo
+- mapa mental
+- chat
+
+Se nao houver override do usuario, a aplicacao continua usando a configuracao global de `.env`.
+
+Endpoints:
+
+- `GET /v1/me/ai-settings`
+- `PUT /v1/me/ai-settings`
+- `DELETE /v1/me/ai-settings`
+
+Payload de exemplo:
+
+```json
+{
+  "provider_type": "openai_compatible",
+  "base_url": "https://seu-provedor.com/v1",
+  "model": "gpt-4.1-mini",
+  "api_key": "sk-..."
+}
+```
 
 ## Próximos passos recomendados
 

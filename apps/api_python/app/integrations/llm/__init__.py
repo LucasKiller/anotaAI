@@ -1,3 +1,15 @@
-from app.integrations.llm.ai_gateway import AiGatewayClient, AiGatewayError, GatewayTextResult
+from app.integrations.llm.ai_gateway import (
+    AiGatewayClient,
+    AiGatewayError,
+    GatewayTextResult,
+    LlmProviderError,
+    OpenAICompatibleClient,
+)
 
-__all__ = ["AiGatewayClient", "AiGatewayError", "GatewayTextResult"]
+__all__ = [
+    "AiGatewayClient",
+    "AiGatewayError",
+    "GatewayTextResult",
+    "LlmProviderError",
+    "OpenAICompatibleClient",
+]

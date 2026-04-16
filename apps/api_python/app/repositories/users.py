@@ -4,7 +4,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import RefreshToken, User
+from app.models import RefreshToken, User, UserAiSetting
 
 
 class UserRepository:
@@ -33,6 +33,45 @@ class UserRepository:
         self.db.add(user)
         self.db.flush()
         return user
+
+    def get_ai_settings(self, user_id: UUID) -> UserAiSetting | None:
+        stmt = select(UserAiSetting).where(UserAiSetting.user_id == user_id)
+        return self.db.scalar(stmt)
+
+    def upsert_ai_settings(
+        self,
+        *,
+        user_id: UUID,
+        provider_type: str,
+        base_url: str | None,
+        model_name: str,
+        api_key_encrypted: str,
+        api_key_hint: str | None,
+    ) -> UserAiSetting:
+        settings = self.get_ai_settings(user_id)
+        if settings is None:
+            settings = UserAiSetting(
+                user_id=user_id,
+                provider_type=provider_type,
+                base_url=base_url,
+                model_name=model_name,
+                api_key_encrypted=api_key_encrypted,
+                api_key_hint=api_key_hint,
+            )
+        else:
+            settings.provider_type = provider_type
+            settings.base_url = base_url
+            settings.model_name = model_name
+            settings.api_key_encrypted = api_key_encrypted
+            settings.api_key_hint = api_key_hint
+
+        self.db.add(settings)
+        self.db.flush()
+        return settings
+
+    def delete_ai_settings(self, settings: UserAiSetting) -> None:
+        self.db.delete(settings)
+        self.db.flush()
 
 
 class RefreshTokenRepository:

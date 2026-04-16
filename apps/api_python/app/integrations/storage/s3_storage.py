@@ -4,7 +4,9 @@ from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import PurePosixPath
 import re
+import sys
 import unicodedata
+from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID, uuid4
 
 import boto3
@@ -14,6 +16,18 @@ from botocore.config import Config
 from app.core.config import get_settings
 
 settings = get_settings()
+
+
+def _normalize_endpoint_url(endpoint_url: str) -> str:
+    if sys.platform != "win32":
+        return endpoint_url
+
+    parsed = urlsplit(endpoint_url)
+    if parsed.hostname != "localhost":
+        return endpoint_url
+
+    netloc = parsed.netloc.replace("localhost", "127.0.0.1", 1)
+    return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
 
 
 @dataclass
@@ -30,9 +44,10 @@ class StorageUploadError(Exception):
 
 class S3Storage:
     def __init__(self) -> None:
+        endpoint_url = _normalize_endpoint_url(settings.s3_endpoint)
         self._client = boto3.client(
             "s3",
-            endpoint_url=settings.s3_endpoint,
+            endpoint_url=endpoint_url,
             aws_access_key_id=settings.s3_access_key,
             aws_secret_access_key=settings.s3_secret_key,
             region_name=settings.s3_region,
@@ -99,7 +114,8 @@ class S3Storage:
             )
         except (ClientError, BotoCoreError) as exc:
             raise StorageUploadError(
-                f"Upload to storage failed for endpoint={settings.s3_endpoint} bucket={settings.s3_bucket}"
+                "Upload to storage failed for "
+                f"endpoint={settings.s3_endpoint} bucket={settings.s3_bucket}: {exc}"
             ) from exc
 
         return UploadedObject(

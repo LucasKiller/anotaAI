@@ -14,6 +14,7 @@ from app.schemas.jobs import ProcessingJobListResponse, ProcessingJobResponse
 from app.schemas.recordings import RecordingCreate, RecordingListResponse, RecordingResponse, RecordingUpdate
 from app.schemas.transcript import TranscriptResponse, TranscriptSegmentListResponse, TranscriptSegmentResponse
 from app.schemas.uploads import CompleteUploadRequest, UploadResponse
+from app.schemas.users import UserAiSettingsResponse, UserAiSettingsUpdateRequest
 
 __all__ = [
     "ArtifactResponse",
@@ -43,4 +44,6 @@ __all__ = [
     "TranscriptSegmentResponse",
     "CompleteUploadRequest",
     "UploadResponse",
+    "UserAiSettingsResponse",
+    "UserAiSettingsUpdateRequest",
 ]

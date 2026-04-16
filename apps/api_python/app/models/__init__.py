@@ -10,6 +10,7 @@ from app.models.entities import (
     SegmentEmbedding,
     Transcript,
     TranscriptSegment,
+    UserAiSetting,
     UsageEvent,
     User,
 )
@@ -26,6 +27,7 @@ __all__ = [
     "SegmentEmbedding",
     "Transcript",
     "TranscriptSegment",
+    "UserAiSetting",
     "UsageEvent",
     "User",
 ]

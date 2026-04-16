@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 30
+    ai_settings_encryption_key: str | None = None
 
     llm_provider: str = "ollama"
     llm_base_url: str = "http://localhost:11434/api"

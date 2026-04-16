@@ -1,5 +1,7 @@
 from pathlib import Path
 import tempfile
+import sys
+from urllib.parse import urlsplit, urlunsplit
 
 import boto3
 from botocore.config import Config
@@ -10,15 +12,28 @@ from app.config import get_settings
 settings = get_settings()
 
 
+def _normalize_endpoint_url(endpoint_url: str) -> str:
+    if sys.platform != "win32":
+        return endpoint_url
+
+    parsed = urlsplit(endpoint_url)
+    if parsed.hostname != "localhost":
+        return endpoint_url
+
+    netloc = parsed.netloc.replace("localhost", "127.0.0.1", 1)
+    return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
+
+
 class StorageDownloadError(RuntimeError):
     """Raised when the worker cannot download an object from storage."""
 
 
 class S3StorageClient:
     def __init__(self) -> None:
+        endpoint_url = _normalize_endpoint_url(settings.s3_endpoint)
         self._client = boto3.client(
             's3',
-            endpoint_url=settings.s3_endpoint,
+            endpoint_url=endpoint_url,
             aws_access_key_id=settings.s3_access_key,
             aws_secret_access_key=settings.s3_secret_key,
             region_name=settings.s3_region,

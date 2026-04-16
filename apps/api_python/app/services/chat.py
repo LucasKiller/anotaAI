@@ -3,19 +3,17 @@ import json
 
 from sqlalchemy.orm import Session
 
-from app.core.config import get_settings
-from app.integrations.llm import AiGatewayClient, AiGatewayError
+from app.integrations.llm import LlmProviderError, OpenAICompatibleClient
+from app.integrations.llm.provider_config import resolve_effective_llm_config
 from app.models import ChatMessage, ChatSession
-from app.repositories import ChatRepository
-
-settings = get_settings()
-_GATEWAY_PROVIDERS = {"ai_gateway", "gateway"}
+from app.repositories import ChatRepository, UserRepository
 
 
 class ChatService:
     def __init__(self, db: Session):
         self.db = db
         self.chat = ChatRepository(db)
+        self.users = UserRepository(db)
 
     def create_session(self, *, recording_id: UUID, user_id: UUID, title: str | None) -> ChatSession:
         session = self.chat.create_session(recording_id=recording_id, user_id=user_id, title=title)
@@ -43,33 +41,39 @@ class ChatService:
 
         if not relevant_segments and not summary_artifact and not mindmap_artifact:
             answer = "Ainda nao ha transcricao ou artefatos suficientes para responder sobre esta gravacao."
-        elif settings.llm_provider in _GATEWAY_PROVIDERS or settings.llm_api_key:
-            client = AiGatewayClient()
-            try:
-                answer = client.create_chat_completion(
-                    messages=self._build_messages(
-                        session=session,
-                        user_content=user_content,
-                        recent_messages=recent_messages,
-                        relevant_segments=relevant_segments,
-                        summary_markdown=summary_artifact.content_md if summary_artifact else None,
-                        mindmap_json=mindmap_artifact.content_json if mindmap_artifact else None,
-                    ),
-                    temperature=0.2,
-                    max_completion_tokens=800,
-                ).text
-            except AiGatewayError as exc:
-                raise ValueError(f"Falha ao consultar o AI Gateway: {exc}") from exc
         else:
-            context = "\n".join(
-                f"- [{self._format_ms(seg.start_ms)}-{self._format_ms(seg.end_ms)}] {seg.text}"
-                for seg in relevant_segments
-            )
-            answer = (
-                "Resposta baseada na transcricao atual:\n"
-                f"{context}\n\n"
-                "Configure o AI Gateway para respostas conversacionais mais elaboradas."
-            )
+            llm_config = resolve_effective_llm_config(self.users.get_ai_settings(session.user_id))
+            if llm_config.has_api_key:
+                client = OpenAICompatibleClient(
+                    base_url=llm_config.base_url,
+                    api_key=llm_config.api_key,
+                    model=llm_config.model,
+                )
+                try:
+                    answer = client.create_chat_completion(
+                        messages=self._build_messages(
+                            session=session,
+                            user_content=user_content,
+                            recent_messages=recent_messages,
+                            relevant_segments=relevant_segments,
+                            summary_markdown=summary_artifact.content_md if summary_artifact else None,
+                            mindmap_json=mindmap_artifact.content_json if mindmap_artifact else None,
+                        ),
+                        temperature=0.2,
+                        max_completion_tokens=800,
+                    ).text
+                except LlmProviderError as exc:
+                    raise ValueError(f"Falha ao consultar o provedor de IA: {exc}") from exc
+            else:
+                context = "\n".join(
+                    f"- [{self._format_ms(seg.start_ms)}-{self._format_ms(seg.end_ms)}] {seg.text}"
+                    for seg in relevant_segments
+                )
+                answer = (
+                    "Resposta baseada na transcricao atual:\n"
+                    f"{context}\n\n"
+                    "Configure uma chave de IA no seu perfil para respostas mais elaboradas."
+                )
 
         assistant_message = self.chat.create_message(
             session_id=session.id,

@@ -67,6 +67,19 @@ class ApiClient {
     );
   }
 
+  Future<dynamic> put(
+    String path, {
+    String? accessToken,
+    Object? body,
+  }) {
+    return _request(
+      method: 'PUT',
+      path: path,
+      accessToken: accessToken,
+      body: body,
+    );
+  }
+
   Future<dynamic> _request({
     required String method,
     required String path,
@@ -92,6 +105,8 @@ class ApiClient {
       response = await http.get(uri, headers: headers);
     } else if (method == 'POST') {
       response = await http.post(uri, headers: headers, body: _encodeBody(body));
+    } else if (method == 'PUT') {
+      response = await http.put(uri, headers: headers, body: _encodeBody(body));
     } else if (method == 'PATCH') {
       response = await http.patch(uri, headers: headers, body: _encodeBody(body));
     } else if (method == 'DELETE') {

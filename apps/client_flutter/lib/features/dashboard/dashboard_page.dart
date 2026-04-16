@@ -279,6 +279,171 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
+  Future<void> _editAiSettings() async {
+    final current = widget.authController.aiSettings;
+    final providerTypeNotifier = ValueNotifier<String>(
+      current?.providerType ?? 'openai',
+    );
+    final baseUrlController = TextEditingController(
+      text: current != null && !current.isOpenAi ? current.baseUrl : '',
+    );
+    final modelController = TextEditingController(
+      text: current?.model.isNotEmpty == true ? current!.model : 'gpt-4.1-mini',
+    );
+    final apiKeyController = TextEditingController();
+
+    final result = await showDialog<_AiSettingsDialogResult?>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Configurar IA pessoal'),
+          content: SizedBox(
+            width: 520,
+            child: ValueListenableBuilder<String>(
+              valueListenable: providerTypeNotifier,
+              builder: (context, providerType, _) {
+                final overrideActive = current?.isUserOverride ?? false;
+                final existingKeyHint = current?.apiKeyHint;
+                return SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        overrideActive
+                            ? 'Override do usuario ativo.'
+                            : 'Sem override salvo. O sistema usa a configuracao padrao ate voce salvar a sua.',
+                      ),
+                      if (existingKeyHint != null && existingKeyHint.isNotEmpty) ...<Widget>[
+                        const SizedBox(height: 8),
+                        Text('Chave salva: $existingKeyHint'),
+                      ],
+                      const SizedBox(height: 16),
+                      DropdownButtonFormField<String>(
+                        initialValue: providerType,
+                        decoration: const InputDecoration(
+                          labelText: 'Provider',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: const <DropdownMenuItem<String>>[
+                          DropdownMenuItem<String>(
+                            value: 'openai',
+                            child: Text('OpenAI oficial'),
+                          ),
+                          DropdownMenuItem<String>(
+                            value: 'openai_compatible',
+                            child: Text('OpenAI-compatible'),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          if (value != null) {
+                            providerTypeNotifier.value = value;
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      if (providerType == 'openai_compatible') ...<Widget>[
+                        TextField(
+                          controller: baseUrlController,
+                          decoration: const InputDecoration(
+                            labelText: 'Base URL',
+                            hintText: 'https://seu-provedor.com/v1',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      TextField(
+                        controller: modelController,
+                        decoration: const InputDecoration(
+                          labelText: 'Modelo',
+                          hintText: 'gpt-4.1-mini',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: apiKeyController,
+                        obscureText: true,
+                        decoration: InputDecoration(
+                          labelText: 'API key',
+                          hintText: overrideActive
+                              ? 'Deixe vazio para manter a chave atual'
+                              : 'Cole sua chave',
+                          border: const OutlineInputBorder(),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+          actions: <Widget>[
+            if (current?.isUserOverride == true)
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(
+                  const _AiSettingsDialogResult.clearOverride(),
+                ),
+                child: const Text('Usar padrao do sistema'),
+              ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(
+                _AiSettingsDialogResult.save(
+                  providerType: providerTypeNotifier.value,
+                  baseUrl: baseUrlController.text.trim(),
+                  model: modelController.text.trim(),
+                  apiKey: apiKeyController.text.trim(),
+                ),
+              ),
+              child: const Text('Salvar'),
+            ),
+          ],
+        );
+      },
+    );
+
+    providerTypeNotifier.dispose();
+    baseUrlController.dispose();
+    modelController.dispose();
+    apiKeyController.dispose();
+
+    if (result == null) {
+      return;
+    }
+
+    try {
+      if (result.clearOverride) {
+        await widget.authController.clearAiSettings();
+        _showMessage('Configuracao de IA do usuario removida. O sistema voltou ao padrao.');
+        return;
+      }
+
+      if (result.model.trim().isEmpty) {
+        _showMessage('Informe o modelo.');
+        return;
+      }
+      if (result.providerType == 'openai_compatible' && result.baseUrl.trim().isEmpty) {
+        _showMessage('Informe a Base URL do provider OpenAI-compatible.');
+        return;
+      }
+
+      await widget.authController.updateAiSettings(
+        providerType: result.providerType,
+        baseUrl: result.providerType == 'openai' ? null : result.baseUrl.trim(),
+        model: result.model.trim(),
+        apiKey: result.apiKey.trim().isEmpty ? null : result.apiKey.trim(),
+      );
+      _showMessage('Configuracao de IA atualizada.');
+    } on ApiException catch (error) {
+      _showMessage(error.message);
+    }
+  }
+
   Future<void> _editSelectedRecording() async {
     final token = widget.authController.accessToken;
     final selected = _recordingsController.selected;
@@ -462,6 +627,11 @@ class _DashboardPageState extends State<DashboardPage> {
                 tooltip: 'Editar nome',
                 onPressed: _editProfileName,
                 icon: const Icon(Icons.person),
+              ),
+              IconButton(
+                tooltip: 'Configurar IA',
+                onPressed: _editAiSettings,
+                icon: const Icon(Icons.tune),
               ),
               IconButton(
                 tooltip: 'Sair',
@@ -928,4 +1098,26 @@ class _DashboardPageState extends State<DashboardPage> {
     final seconds = totalSeconds % 60;
     return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
   }
+}
+
+class _AiSettingsDialogResult {
+  const _AiSettingsDialogResult.save({
+    required this.providerType,
+    required this.baseUrl,
+    required this.model,
+    required this.apiKey,
+  }) : clearOverride = false;
+
+  const _AiSettingsDialogResult.clearOverride()
+      : providerType = 'openai',
+        baseUrl = '',
+        model = '',
+        apiKey = '',
+        clearOverride = true;
+
+  final String providerType;
+  final String baseUrl;
+  final String model;
+  final String apiKey;
+  final bool clearOverride;
 }

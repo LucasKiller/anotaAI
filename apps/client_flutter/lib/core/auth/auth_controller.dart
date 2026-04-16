@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../../shared/models/app_user.dart';
+import '../../shared/models/user_ai_settings.dart';
 import '../network/api_client.dart';
 import '../storage/token_storage.dart';
 
@@ -20,6 +21,7 @@ class AuthController extends ChangeNotifier {
   String? _accessToken;
   String? _refreshToken;
   AppUser? _currentUser;
+  UserAiSettings? _aiSettings;
 
   bool get isBootstrapping => _isBootstrapping;
   bool get isLoading => _isLoading;
@@ -27,6 +29,7 @@ class AuthController extends ChangeNotifier {
   String? get accessToken => _accessToken;
   String? get refreshToken => _refreshToken;
   AppUser? get currentUser => _currentUser;
+  UserAiSettings? get aiSettings => _aiSettings;
   bool get isAuthenticated => _accessToken != null && _currentUser != null;
 
   Future<void> bootstrap() async {
@@ -41,6 +44,14 @@ class AuthController extends ChangeNotifier {
         await _fetchCurrentUser();
       } on ApiException {
         await _clearSession();
+      }
+
+      if (_accessToken != null) {
+        try {
+          await loadAiSettings(notify: false);
+        } on ApiException {
+          _aiSettings = null;
+        }
       }
     }
 
@@ -60,6 +71,11 @@ class AuthController extends ChangeNotifier {
       );
       await _consumeTokenPayload(response as Map<String, dynamic>);
       await _fetchCurrentUser();
+      try {
+        await loadAiSettings(notify: false);
+      } on ApiException {
+        _aiSettings = null;
+      }
     } finally {
       _setLoading(false);
     }
@@ -83,6 +99,11 @@ class AuthController extends ChangeNotifier {
       );
       await _consumeTokenPayload(response as Map<String, dynamic>);
       await _fetchCurrentUser();
+      try {
+        await loadAiSettings(notify: false);
+      } on ApiException {
+        _aiSettings = null;
+      }
     } finally {
       _setLoading(false);
     }
@@ -128,6 +149,70 @@ class AuthController extends ChangeNotifier {
     }
   }
 
+  Future<void> loadAiSettings({bool notify = true}) async {
+    final token = _accessToken;
+    if (token == null) {
+      throw ApiException(message: 'Sessao expirada', statusCode: 401);
+    }
+
+    final response = await _apiClient.get('/me/ai-settings', accessToken: token);
+    _aiSettings = UserAiSettings.fromJson(response as Map<String, dynamic>);
+    if (notify) {
+      notifyListeners();
+    }
+  }
+
+  Future<void> updateAiSettings({
+    required String providerType,
+    required String model,
+    String? baseUrl,
+    String? apiKey,
+  }) async {
+    final token = _accessToken;
+    if (token == null) {
+      throw ApiException(message: 'Sessao expirada', statusCode: 401);
+    }
+
+    _setLoading(true);
+    _setError(null);
+    try {
+      final response = await _apiClient.put(
+        '/me/ai-settings',
+        accessToken: token,
+        body: <String, dynamic>{
+          'provider_type': providerType,
+          'base_url': baseUrl,
+          'model': model,
+          if (apiKey != null && apiKey.trim().isNotEmpty) 'api_key': apiKey.trim(),
+        },
+      );
+      _aiSettings = UserAiSettings.fromJson(response as Map<String, dynamic>);
+      notifyListeners();
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  Future<void> clearAiSettings() async {
+    final token = _accessToken;
+    if (token == null) {
+      throw ApiException(message: 'Sessao expirada', statusCode: 401);
+    }
+
+    _setLoading(true);
+    _setError(null);
+    try {
+      final response = await _apiClient.delete(
+        '/me/ai-settings',
+        accessToken: token,
+      );
+      _aiSettings = UserAiSettings.fromJson(response as Map<String, dynamic>);
+      notifyListeners();
+    } finally {
+      _setLoading(false);
+    }
+  }
+
   Future<void> _fetchCurrentUser() async {
     final token = _accessToken;
     if (token == null) {
@@ -157,6 +242,7 @@ class AuthController extends ChangeNotifier {
     _accessToken = null;
     _refreshToken = null;
     _currentUser = null;
+    _aiSettings = null;
     await _tokenStorage.clear();
   }
 

@@ -6,11 +6,11 @@ import re
 from typing import Any
 
 from app.config import get_settings
-from app.integrations.llm import AiGatewayClient, AiGatewayError
+from app.integrations.llm import LlmProviderError, OpenAICompatibleClient
+from app.integrations.llm.provider_config import ResolvedLlmConfig
 
 settings = get_settings()
 
-_GATEWAY_PROVIDERS = {"ai_gateway", "gateway"}
 _SUMMARY_CHUNK_CHARS = 5_500
 _MINDMAP_CONTEXT_CHARS = 8_000
 
@@ -31,11 +31,22 @@ class ArtifactGenerationError(RuntimeError):
     """Raised when an AI artifact cannot be generated."""
 
 
-def build_summary_markdown(title: str, full_text: str, segments: list[dict]) -> GeneratedMarkdownArtifact:
-    if settings.llm_provider not in _GATEWAY_PROVIDERS and not settings.llm_api_key:
+def build_summary_markdown(
+    title: str,
+    full_text: str,
+    segments: list[dict],
+    *,
+    llm_config: ResolvedLlmConfig | None = None,
+) -> GeneratedMarkdownArtifact:
+    active_llm_config = llm_config or _default_llm_config()
+    if not active_llm_config or not active_llm_config.has_api_key:
         return GeneratedMarkdownArtifact(content=_stub_summary_markdown(title, full_text, segments), model_name="local-stub")
 
-    client = AiGatewayClient()
+    client = OpenAICompatibleClient(
+        base_url=active_llm_config.base_url,
+        api_key=active_llm_config.api_key,
+        model=active_llm_config.model,
+    )
     chunk_contexts = _build_chunk_contexts(full_text, segments, max_chars=_SUMMARY_CHUNK_CHARS)
 
     try:
@@ -59,8 +70,8 @@ def build_summary_markdown(title: str, full_text: str, segments: list[dict]) -> 
             temperature=0.2,
         )
         return GeneratedMarkdownArtifact(content=final.text.strip(), model_name=final.model or model_name)
-    except AiGatewayError as exc:
-        raise ArtifactGenerationError(f"Falha ao gerar resumo via AI Gateway: {exc}") from exc
+    except LlmProviderError as exc:
+        raise ArtifactGenerationError(f"Falha ao gerar resumo via provedor de IA: {exc}") from exc
 
 
 def build_mindmap_json(
@@ -68,11 +79,18 @@ def build_mindmap_json(
     full_text: str,
     segments: list[dict],
     summary_markdown: str,
+    *,
+    llm_config: ResolvedLlmConfig | None = None,
 ) -> GeneratedJsonArtifact:
-    if settings.llm_provider not in _GATEWAY_PROVIDERS and not settings.llm_api_key:
+    active_llm_config = llm_config or _default_llm_config()
+    if not active_llm_config or not active_llm_config.has_api_key:
         return GeneratedJsonArtifact(content=_stub_mindmap_json(title, segments), model_name="local-stub")
 
-    client = AiGatewayClient()
+    client = OpenAICompatibleClient(
+        base_url=active_llm_config.base_url,
+        api_key=active_llm_config.api_key,
+        model=active_llm_config.model,
+    )
     context = _mindmap_context(title=title, summary_markdown=summary_markdown, full_text=full_text, segments=segments)
 
     try:
@@ -83,7 +101,7 @@ def build_mindmap_json(
             temperature=0.1,
         )
         parsed = _parse_json_payload(result.text)
-    except (AiGatewayError, ValueError):
+    except (LlmProviderError, ValueError):
         try:
             repaired = client.create_response(
                 input_text=context,
@@ -93,10 +111,26 @@ def build_mindmap_json(
             )
             parsed = _parse_json_payload(repaired.text)
             return GeneratedJsonArtifact(content=_normalize_mindmap(parsed, fallback_title=title), model_name=repaired.model)
-        except (AiGatewayError, ValueError) as exc:
-            raise ArtifactGenerationError(f"Falha ao gerar mapa mental via AI Gateway: {exc}") from exc
+        except (LlmProviderError, ValueError) as exc:
+            raise ArtifactGenerationError(f"Falha ao gerar mapa mental via provedor de IA: {exc}") from exc
 
     return GeneratedJsonArtifact(content=_normalize_mindmap(parsed, fallback_title=title), model_name=result.model)
+
+
+def _default_llm_config() -> ResolvedLlmConfig | None:
+    api_key = settings.llm_api_key.strip() if settings.llm_api_key else None
+    base_url = settings.llm_base_url.strip().rstrip("/")
+    model = settings.llm_model.strip()
+    if not api_key or not base_url or not model:
+        return None
+    return ResolvedLlmConfig(
+        source="system",
+        provider_type="openai_compatible",
+        base_url=base_url,
+        model=model,
+        api_key=api_key,
+        has_api_key=True,
+    )
 
 
 def _build_chunk_contexts(full_text: str, segments: list[dict], *, max_chars: int) -> list[str]:
