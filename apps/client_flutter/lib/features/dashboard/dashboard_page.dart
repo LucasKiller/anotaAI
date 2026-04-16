@@ -51,6 +51,9 @@ class _DashboardPageState extends State<DashboardPage> {
   int _currentTabIndex = 0;
   String _recordingFilter = 'all';
   String _searchQuery = '';
+  _WorkspaceTab _workspaceTab = _WorkspaceTab.summary;
+  int _workspaceTabDirection = 1;
+  bool _workspacePlayerExpanded = false;
 
   @override
   void initState() {
@@ -437,6 +440,13 @@ class _DashboardPageState extends State<DashboardPage> {
         accessToken: token,
         recordingId: recording.id,
       );
+      if (mounted) {
+        setState(() {
+          _workspaceTab = _WorkspaceTab.summary;
+          _workspaceTabDirection = 1;
+          _workspacePlayerExpanded = false;
+        });
+      }
       await _chatController.loadForRecording(
         accessToken: token,
         recordingId: recording.id,
@@ -561,6 +571,11 @@ class _DashboardPageState extends State<DashboardPage> {
     }
 
     try {
+      if (!_workspacePlayerExpanded && mounted) {
+        setState(() {
+          _workspacePlayerExpanded = true;
+        });
+      }
       if (_audioPlayerController.loadedRecordingId != selected.id ||
           !_audioPlayerController.isLoaded) {
         await _audioPlayerController.loadForRecording(
@@ -580,6 +595,24 @@ class _DashboardPageState extends State<DashboardPage> {
             .replaceFirst('Exception: ', '')
             .replaceFirst('StateError: ', ''),
       );
+    }
+  }
+
+  Future<void> _loadWorkspaceAudio(RecordingModel selected) async {
+    final token = widget.authController.accessToken;
+    if (token == null) {
+      return;
+    }
+
+    try {
+      await _audioPlayerController.loadForRecording(
+        accessToken: token,
+        recordingId: selected.id,
+      );
+    } on ApiException catch (error) {
+      _showMessage(error.message);
+    } catch (error) {
+      _showMessage(_humanizeLiveRecordingError(error));
     }
   }
 
@@ -692,7 +725,8 @@ class _DashboardPageState extends State<DashboardPage> {
                             ? 'Override do usuario ativo.'
                             : 'Sem override salvo. O sistema usa a configuracao padrao ate voce salvar a sua.',
                       ),
-                      if (existingKeyHint != null && existingKeyHint.isNotEmpty) ...<Widget>[
+                      if (existingKeyHint != null &&
+                          existingKeyHint.isNotEmpty) ...<Widget>[
                         const SizedBox(height: 8),
                         Text('Chave salva: $existingKeyHint'),
                       ],
@@ -797,7 +831,8 @@ class _DashboardPageState extends State<DashboardPage> {
     try {
       if (result.clearOverride) {
         await widget.authController.clearAiSettings();
-        _showMessage('Configuracao de IA do usuario removida. O sistema voltou ao padrao.');
+        _showMessage(
+            'Configuracao de IA do usuario removida. O sistema voltou ao padrao.');
         return;
       }
 
@@ -805,7 +840,8 @@ class _DashboardPageState extends State<DashboardPage> {
         _showMessage('Informe o modelo.');
         return;
       }
-      if (result.providerType == 'openai_compatible' && result.baseUrl.trim().isEmpty) {
+      if (result.providerType == 'openai_compatible' &&
+          result.baseUrl.trim().isEmpty) {
         _showMessage('Informe a Base URL do provider OpenAI-compatible.');
         return;
       }
@@ -1026,7 +1062,8 @@ class _DashboardPageState extends State<DashboardPage> {
     await _openRecordingWorkspace(recording);
   }
 
-  Future<RecordingModel?> _createRecordingForMode(_QuickCreateChoice choice) async {
+  Future<RecordingModel?> _createRecordingForMode(
+      _QuickCreateChoice choice) async {
     final token = widget.authController.accessToken;
     if (token == null) {
       return null;
@@ -1114,29 +1151,14 @@ class _DashboardPageState extends State<DashboardPage> {
                     borderRadius: BorderRadius.circular(999),
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 10),
-                  child: Row(
-                    children: <Widget>[
-                      Expanded(
-                        child: Text(
-                          _recordingsController.selected?.title ??
-                              'Workspace da gravacao',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w800,
-                            color: Color(0xFF101828),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      IconButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        icon: const Icon(Icons.close_rounded),
-                      ),
-                    ],
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 6, 12, 2),
+                    child: IconButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
                   ),
                 ),
                 Expanded(
@@ -1196,23 +1218,27 @@ class _DashboardPageState extends State<DashboardPage> {
                   _buildActionTile(
                     icon: Icons.open_in_full_rounded,
                     label: 'Abrir workspace',
-                    onTap: () => Navigator.of(context).pop(_RecordingAction.open),
+                    onTap: () =>
+                        Navigator.of(context).pop(_RecordingAction.open),
                   ),
                   _buildActionTile(
                     icon: Icons.play_circle_outline_rounded,
                     label: 'Processar novamente',
-                    onTap: () => Navigator.of(context).pop(_RecordingAction.process),
+                    onTap: () =>
+                        Navigator.of(context).pop(_RecordingAction.process),
                   ),
                   _buildActionTile(
                     icon: Icons.edit_outlined,
                     label: 'Editar detalhes',
-                    onTap: () => Navigator.of(context).pop(_RecordingAction.edit),
+                    onTap: () =>
+                        Navigator.of(context).pop(_RecordingAction.edit),
                   ),
                   _buildActionTile(
                     icon: Icons.delete_outline_rounded,
                     label: 'Excluir',
                     destructive: true,
-                    onTap: () => Navigator.of(context).pop(_RecordingAction.delete),
+                    onTap: () =>
+                        Navigator.of(context).pop(_RecordingAction.delete),
                   ),
                   const SizedBox(height: 10),
                 ],
@@ -1295,13 +1321,13 @@ class _DashboardPageState extends State<DashboardPage> {
       final key = DateTime(localDate.year, localDate.month, localDate.day);
       map.putIfAbsent(key, () => <RecordingModel>[]).add(recording);
     }
-    final days = map.keys.toList()
-      ..sort((a, b) => b.compareTo(a));
+    final days = map.keys.toList()..sort((a, b) => b.compareTo(a));
     return days
         .map(
           (day) => _RecordingGroup(
             day: day,
-            items: map[day]!..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
+            items: map[day]!
+              ..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
           ),
         )
         .toList();
@@ -1346,7 +1372,9 @@ class _DashboardPageState extends State<DashboardPage> {
         text.contains('lingua')) {
       return '🗣️';
     }
-    if (text.contains('mark') || text.contains('venda') || text.contains('negoc')) {
+    if (text.contains('mark') ||
+        text.contains('venda') ||
+        text.contains('negoc')) {
       return '📈';
     }
     return '🎙️';
@@ -1417,7 +1445,9 @@ class _DashboardPageState extends State<DashboardPage> {
     }
     final parts = source.split(RegExp(r'\s+'));
     if (parts.length == 1) {
-      return parts.first.substring(0, parts.first.length >= 2 ? 2 : 1).toUpperCase();
+      return parts.first
+          .substring(0, parts.first.length >= 2 ? 2 : 1)
+          .toUpperCase();
     }
     return '${parts.first.substring(0, 1)}${parts.last.substring(0, 1)}'
         .toUpperCase();
@@ -1528,8 +1558,7 @@ class _DashboardPageState extends State<DashboardPage> {
             duration: const Duration(milliseconds: 280),
             switchInCurve: Curves.easeOutCubic,
             switchOutCurve: Curves.easeInCubic,
-            child:
-                _currentTabIndex == 0 ? _buildHomeTab() : _buildProfileTab(),
+            child: _currentTabIndex == 0 ? _buildHomeTab() : _buildProfileTab(),
           ),
         ),
       ),
@@ -1688,9 +1717,7 @@ class _DashboardPageState extends State<DashboardPage> {
           color: active ? const Color(0xFF1A2030) : Colors.transparent,
           borderRadius: BorderRadius.circular(24),
           border: Border.all(
-            color: active
-                ? const Color(0xFF364152)
-                : Colors.transparent,
+            color: active ? const Color(0xFF364152) : Colors.transparent,
           ),
         ),
         child: Column(
@@ -2047,8 +2074,8 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Widget _buildHomeTab() {
     final groups = _groupedRecordings;
-    final isLoading =
-        _recordingsController.isListLoading && _recordingsController.recordings.isEmpty;
+    final isLoading = _recordingsController.isListLoading &&
+        _recordingsController.recordings.isEmpty;
 
     return Column(
       key: const ValueKey('home-tab'),
@@ -2352,9 +2379,7 @@ class _DashboardPageState extends State<DashboardPage> {
             color: active ? Colors.white : const Color(0xFF151922),
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
-              color: active
-                  ? Colors.white
-                  : const Color(0xFF252B34),
+              color: active ? Colors.white : const Color(0xFF252B34),
             ),
           ),
           child: Text(
@@ -2717,8 +2742,7 @@ class _DashboardPageState extends State<DashboardPage> {
     required VoidCallback onTap,
     bool destructive = false,
   }) {
-    final titleColor =
-        destructive ? const Color(0xFFFF8B82) : Colors.white;
+    final titleColor = destructive ? const Color(0xFFFF8B82) : Colors.white;
     final iconColor =
         destructive ? const Color(0xFFFF8B82) : const Color(0xFF89A2FF);
 
@@ -2902,157 +2926,764 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Widget _buildDetailPanel(RecordingModel? selected) {
     if (selected == null) {
-      return const Card(
-        child: Center(
-          child: Text('Selecione uma gravacao para ver detalhes.'),
+      return Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFF10141B),
+          borderRadius: BorderRadius.circular(30),
+          border: Border.all(
+            color: const Color(0xFF323A46).withValues(alpha: 0.55),
+            width: 0.8,
+          ),
+        ),
+        child: const Center(
+          child: Text(
+            'Selecione uma gravacao para ver detalhes.',
+            style: TextStyle(color: Colors.white),
+          ),
         ),
       );
     }
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: _recordingsController.isDetailLoading
-            ? const Center(child: CircularProgressIndicator())
-            : SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: <Widget>[
-                              Text(
-                                selected.title,
-                                style:
-                                    Theme.of(context).textTheme.headlineSmall,
-                              ),
-                              const SizedBox(height: 8),
-                              Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide = constraints.maxWidth >= 920;
+
+        return Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFF10141B),
+            borderRadius: BorderRadius.circular(30),
+            border: Border.all(
+              color: const Color(0xFF323A46).withValues(alpha: 0.55),
+              width: 0.8,
+            ),
+          ),
+          child: Padding(
+            padding: EdgeInsets.all(isWide ? 20 : 14),
+            child: _recordingsController.isDetailLoading
+                ? const Center(
+                    child: CircularProgressIndicator(color: Colors.white),
+                  )
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      _buildWorkspaceHeader(selected, isWide: isWide),
+                      SizedBox(height: isWide ? 14 : 12),
+                      _buildWorkspaceTabBar(),
+                      const SizedBox(height: 12),
+                      _buildWorkspacePlayerCard(selected),
+                      const SizedBox(height: 12),
+                      Expanded(
+                        child: ClipRect(
+                          child: AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 280),
+                            switchInCurve: Curves.easeOutCubic,
+                            switchOutCurve: Curves.easeInCubic,
+                            layoutBuilder: (currentChild, previousChildren) {
+                              return Stack(
+                                fit: StackFit.expand,
                                 children: <Widget>[
-                                  Chip(
-                                      label:
-                                          Text('Status: ${selected.status}')),
-                                  Chip(
-                                      label: Text(
-                                          'Fonte: ${selected.sourceType}')),
-                                  if (selected.language != null)
-                                    Chip(
-                                        label: Text(
-                                            'Idioma: ${selected.language}')),
+                                  ...previousChildren,
+                                  if (currentChild != null) currentChild,
                                 ],
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                'Criado em ${_formatDate(selected.createdAt)}',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                              if (selected.description != null &&
-                                  selected.description!.isNotEmpty) ...<Widget>[
-                                const SizedBox(height: 8),
-                                Text(
-                                  selected.description!,
-                                  style: Theme.of(context).textTheme.bodyMedium,
+                              );
+                            },
+                            transitionBuilder: (child, animation) {
+                              final currentKey = ValueKey<String>(
+                                'workspace-tab-${_workspaceTab.name}-${selected.id}',
+                              );
+                              final isIncoming = child.key == currentKey;
+                              final beginX = isIncoming
+                                  ? (_workspaceTabDirection > 0 ? 0.14 : -0.14)
+                                  : (_workspaceTabDirection > 0 ? -0.10 : 0.10);
+                              final fade = CurvedAnimation(
+                                parent: animation,
+                                curve: Curves.easeOutCubic,
+                                reverseCurve: Curves.easeInCubic,
+                              );
+                              final offset = Tween<Offset>(
+                                begin: Offset(beginX, 0),
+                                end: Offset.zero,
+                              ).animate(fade);
+
+                              return FadeTransition(
+                                opacity: fade,
+                                child: SlideTransition(
+                                  position: offset,
+                                  child: child,
                                 ),
-                              ],
-                            ],
+                              );
+                            },
+                            child: _buildWorkspaceTabContent(
+                              selected,
+                              isWide: isWide,
+                            ),
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        Column(
-                          children: <Widget>[
-                            FilledButton.tonalIcon(
-                              onPressed: _isLiveRecordingLocked
-                                  ? null
-                                  : _editSelectedRecording,
-                              icon: const Icon(Icons.edit),
-                              label: const Text('Editar'),
-                            ),
-                            const SizedBox(height: 8),
-                            OutlinedButton.icon(
-                              onPressed: _isLiveRecordingLocked
-                                  ? null
-                                  : _deleteSelectedRecording,
-                              icon: const Icon(Icons.delete_outline),
-                              label: const Text('Excluir'),
-                            ),
-                            const SizedBox(height: 8),
-                            FilledButton.icon(
-                              onPressed:
-                                  _isLiveRecordingLocked ? null : _uploadAudio,
-                              icon: const Icon(Icons.upload_file),
-                              label: const Text('Enviar audio'),
-                            ),
-                            const SizedBox(height: 8),
-                            FilledButton.icon(
-                              onPressed: _isLiveRecordingLocked
-                                  ? null
-                                  : _processRecording,
-                              icon: const Icon(Icons.play_arrow),
-                              label: const Text('Processar'),
-                            ),
-                            const SizedBox(height: 8),
-                            OutlinedButton.icon(
-                              onPressed: _isLiveRecordingLocked
-                                  ? null
-                                  : _refreshDetails,
-                              icon: const Icon(Icons.refresh),
-                              label: const Text('Atualizar'),
-                            ),
-                          ],
+                      ),
+                    ],
+                  ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildWorkspaceHeader(
+    RecordingModel selected, {
+    required bool isWide,
+  }) {
+    final metaCards = <Widget>[
+      _buildWorkspaceMetaPill(
+        icon: Icons.schedule_rounded,
+        label: _formatDate(selected.createdAt),
+      ),
+      _buildWorkspaceMetaPill(
+        icon: Icons.radio_button_checked_rounded,
+        label: selected.status,
+        accent: switch (selected.status) {
+          'ready' => const Color(0xFF23B26D),
+          'processing' => const Color(0xFFF5B944),
+          'failed' => const Color(0xFFF97066),
+          _ => const Color(0xFF98A2B3),
+        },
+      ),
+      _buildWorkspaceMetaPill(
+        icon: Icons.source_outlined,
+        label: selected.sourceType == 'live_recording'
+            ? 'Gravacao ao vivo'
+            : 'Upload',
+      ),
+      if (selected.language != null && selected.language!.trim().isNotEmpty)
+        _buildWorkspaceMetaPill(
+          icon: Icons.language_rounded,
+          label: selected.language!,
+        ),
+    ];
+    final actionBar = _buildWorkspaceActionBar(isWide: isWide);
+
+    if (isWide) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Expanded(
+                child: _buildWorkspaceIdentity(
+                  selected,
+                  isWide: true,
+                ),
+              ),
+              const SizedBox(width: 16),
+              actionBar,
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: metaCards,
+          ),
+        ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        _buildWorkspaceIdentity(selected, isWide: false),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: metaCards,
+        ),
+        const SizedBox(height: 12),
+        actionBar,
+      ],
+    );
+  }
+
+  Widget _buildWorkspaceIdentity(
+    RecordingModel selected, {
+    required bool isWide,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Container(
+          width: isWide ? 62 : 54,
+          height: isWide ? 62 : 54,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: const Color(0xFF171C24),
+            borderRadius: BorderRadius.circular(isWide ? 20 : 18),
+            border: Border.all(
+              color: const Color(0xFF3A4250).withValues(alpha: 0.58),
+              width: 0.8,
+            ),
+          ),
+          child: Text(
+            _recordingEmoji(selected),
+            style: TextStyle(fontSize: isWide ? 34 : 28),
+          ),
+        ),
+        SizedBox(width: isWide ? 14 : 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                selected.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: isWide ? 28 : 22,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: isWide ? -0.9 : -0.5,
+                  height: 1.05,
+                ),
+              ),
+              if (selected.description != null &&
+                  selected.description!.trim().isNotEmpty) ...<Widget>[
+                const SizedBox(height: 8),
+                Text(
+                  selected.description!,
+                  maxLines: isWide ? 2 : 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Color(0xFFA8B1BE),
+                    fontSize: isWide ? 14 : 13,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildWorkspaceMetaPill({
+    required IconData icon,
+    required String label,
+    Color accent = const Color(0xFF8E98A8),
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF171C24),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: const Color(0xFF3A4250).withValues(alpha: 0.52),
+          width: 0.8,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(icon, size: 14, color: accent),
+          const SizedBox(width: 7),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Color(0xFFE2E8F0),
+              fontWeight: FontWeight.w700,
+              fontSize: 13,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWorkspaceActionBar({
+    required bool isWide,
+  }) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      alignment: isWide ? WrapAlignment.end : WrapAlignment.start,
+      children: <Widget>[
+        _buildWorkspaceActionIconButton(
+          icon: Icons.edit_outlined,
+          tooltip: 'Editar gravacao',
+          onTap: _isLiveRecordingLocked ? null : _editSelectedRecording,
+        ),
+        _buildWorkspaceActionIconButton(
+          icon: Icons.upload_file_rounded,
+          tooltip: 'Enviar audio',
+          onTap: _isLiveRecordingLocked ? null : _uploadAudio,
+        ),
+        _buildWorkspaceActionIconButton(
+          icon: Icons.play_arrow_rounded,
+          tooltip: 'Processar gravacao',
+          emphasized: true,
+          onTap: _isLiveRecordingLocked ? null : _processRecording,
+        ),
+        _buildWorkspaceActionIconButton(
+          icon: Icons.refresh_rounded,
+          tooltip: 'Atualizar dados',
+          onTap: _isLiveRecordingLocked ? null : _refreshDetails,
+        ),
+        PopupMenuButton<_WorkspaceOverflowAction>(
+          tooltip: 'Mais acoes',
+          enabled: !_isLiveRecordingLocked,
+          color: const Color(0xFF171C24),
+          surfaceTintColor: Colors.transparent,
+          onSelected: (action) {
+            switch (action) {
+              case _WorkspaceOverflowAction.delete:
+                _deleteSelectedRecording();
+            }
+          },
+          itemBuilder: (context) =>
+              const <PopupMenuEntry<_WorkspaceOverflowAction>>[
+            PopupMenuItem<_WorkspaceOverflowAction>(
+              value: _WorkspaceOverflowAction.delete,
+              child: Row(
+                children: <Widget>[
+                  Icon(Icons.delete_outline_rounded, color: Color(0xFFFF9A91)),
+                  SizedBox(width: 10),
+                  Text(
+                    'Excluir',
+                    style: TextStyle(color: Color(0xFFFF9A91)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          child: Opacity(
+            opacity: _isLiveRecordingLocked ? 0.42 : 1,
+            child: Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: const Color(0xFF171C24),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: const Color(0xFF282F39).withValues(alpha: 0.55),
+                  width: 0.8,
+                ),
+              ),
+              child: const Icon(
+                Icons.more_horiz_rounded,
+                color: Colors.white,
+                size: 19,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildWorkspaceActionIconButton({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback? onTap,
+    bool emphasized = false,
+    bool destructive = false,
+  }) {
+    final background = destructive
+        ? const Color(0xFF2A171A)
+        : emphasized
+            ? const Color(0xFF5B7CFF)
+            : const Color(0xFF171C24);
+    final border = destructive
+        ? const Color(0xFF4A2329)
+        : emphasized
+            ? const Color(0xFF6C89FF)
+            : const Color(0xFF282F39);
+    final foreground = destructive ? const Color(0xFFFF9A91) : Colors.white;
+
+    return Tooltip(
+      message: tooltip,
+      child: Opacity(
+        opacity: onTap == null ? 0.42 : 1,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Ink(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: background,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: border.withValues(alpha: emphasized ? 0.82 : 0.55),
+                width: 0.8,
+              ),
+            ),
+            child: Icon(icon, size: 19, color: foreground),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWorkspaceTabBar() {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: _WorkspaceTab.values
+            .map((tab) => Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: _buildWorkspaceTabButton(tab),
+                ))
+            .toList(),
+      ),
+    );
+  }
+
+  Widget _buildWorkspaceTabButton(_WorkspaceTab tab) {
+    final active = _workspaceTab == tab;
+    final currentIndex = _WorkspaceTab.values.indexOf(_workspaceTab);
+    final targetIndex = _WorkspaceTab.values.indexOf(tab);
+    final (icon, label) = switch (tab) {
+      _WorkspaceTab.summary => (Icons.summarize_outlined, 'Resumo'),
+      _WorkspaceTab.transcript => (Icons.notes_rounded, 'Transcricao'),
+      _WorkspaceTab.mindmap => (Icons.account_tree_outlined, 'Mapa mental'),
+      _WorkspaceTab.chat => (Icons.smart_toy_outlined, 'Chat'),
+    };
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(22),
+      onTap: () {
+        if (tab == _workspaceTab) {
+          return;
+        }
+        setState(() {
+          _workspaceTabDirection = targetIndex >= currentIndex ? 1 : -1;
+          _workspaceTab = tab;
+        });
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          gradient: active
+              ? const LinearGradient(
+                  colors: <Color>[
+                    Color(0xFF9C7CFF),
+                    Color(0xFF5B7CFF),
+                  ],
+                )
+              : null,
+          color: active ? null : const Color(0xFF151922),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: active
+                ? const Color(0xFF7E92FF).withValues(alpha: 0.82)
+                : const Color(0xFF3A4250).withValues(alpha: 0.5),
+            width: active ? 0.9 : 0.8,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(
+              icon,
+              color: Colors.white,
+              size: 18,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                fontSize: 15,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWorkspacePlayerCard(RecordingModel selected) {
+    return AnimatedBuilder(
+      animation: _audioPlayerController,
+      builder: (context, _) {
+        final isLoadedForSelected =
+            _audioPlayerController.loadedRecordingId == selected.id &&
+                _audioPlayerController.isLoaded;
+        final isPlaying =
+            isLoadedForSelected && _audioPlayerController.isPlaying;
+        final isFetching = _audioPlayerController.isFetchingAudio;
+        final timeLabel = isLoadedForSelected
+            ? '${_formatRecordingElapsed(_audioPlayerController.position)} / ${_formatRecordingElapsed(_audioPlayerController.duration)}'
+            : 'Abra apenas quando precisar ouvir';
+
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          decoration: BoxDecoration(
+            color: const Color(0xFF141922),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(
+              color: const Color(0xFF323A46).withValues(alpha: 0.48),
+              width: 0.8,
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  InkWell(
+                    onTap: isFetching
+                        ? null
+                        : () async {
+                            if (isLoadedForSelected) {
+                              await _audioPlayerController.togglePlayback();
+                              return;
+                            }
+                            await _loadWorkspaceAudio(selected);
+                          },
+                    borderRadius: BorderRadius.circular(16),
+                    child: Ink(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1A2231),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Center(
+                        child: isFetching
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Color(0xFF8AA0FF),
+                                ),
+                              )
+                            : Icon(
+                                isLoadedForSelected
+                                    ? (isPlaying
+                                        ? Icons.pause_rounded
+                                        : Icons.play_arrow_rounded)
+                                    : Icons.headphones_rounded,
+                                color: const Color(0xFF8AA0FF),
+                              ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        const Text(
+                          'Audio da gravacao',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          isFetching ? 'Carregando audio...' : timeLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Color(0xFFAAB3C2),
+                            fontSize: 13,
+                          ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 16),
-                    _buildLiveRecordingSection(selected),
-                    const SizedBox(height: 16),
-                    ContentSection(
-                      title: 'Player Da Gravacao',
-                      child: RecordingAudioPlayer(
-                        key: ValueKey('player-${selected.id}'),
-                        controller: _audioPlayerController,
-                        accessToken: widget.authController.accessToken ?? '',
-                        recordingId: selected.id,
-                      ),
+                  ),
+                  IconButton(
+                    tooltip: isLoadedForSelected
+                        ? 'Recarregar audio'
+                        : 'Carregar audio',
+                    onPressed:
+                        isFetching ? null : () => _loadWorkspaceAudio(selected),
+                    icon: Icon(
+                      isLoadedForSelected
+                          ? Icons.refresh_rounded
+                          : Icons.download_rounded,
+                      color: const Color(0xFFAAB3C2),
                     ),
-                    const SizedBox(height: 16),
-                    if (_recordingsController.latestJob != null)
-                      ContentSection(
-                        title: 'Ultimo Job',
-                        child: _buildJobCard(_recordingsController.latestJob!),
-                      ),
-                    ContentSection(
-                      title: 'Transcricao',
-                      child: _buildTranscriptSection(),
+                  ),
+                  IconButton(
+                    tooltip: _workspacePlayerExpanded
+                        ? 'Recolher player'
+                        : 'Expandir player',
+                    onPressed: () {
+                      setState(() {
+                        _workspacePlayerExpanded = !_workspacePlayerExpanded;
+                      });
+                    },
+                    icon: Icon(
+                      _workspacePlayerExpanded
+                          ? Icons.keyboard_arrow_up_rounded
+                          : Icons.keyboard_arrow_down_rounded,
+                      color: const Color(0xFFAAB3C2),
                     ),
-                    ContentSection(
-                      title: 'Resumo',
-                      child: AppMarkdown(
-                        data: _recordingsController.summary?.contentMd ??
-                            'Ainda sem resumo. Rode o processamento para gerar.',
-                      ),
-                    ),
-                    ContentSection(
-                      title: 'Mapa Mental',
-                      child: MindmapViewer(
-                        key: ValueKey(_recordingsController.mindmap?.id),
-                        artifact: _recordingsController.mindmap,
-                        transcript: _recordingsController.transcript,
-                        transcriptSegments:
-                            _recordingsController.transcriptSegments,
-                        emptyMessage:
-                            'Ainda sem mapa mental. Rode o processamento para gerar.',
-                      ),
-                    ),
-                    _buildChatSection(selected),
-                  ],
+                  ),
+                ],
+              ),
+              ClipRect(
+                child: AnimatedSize(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeInOutCubic,
+                  alignment: Alignment.topCenter,
+                  child: _workspacePlayerExpanded
+                      ? Padding(
+                          padding: const EdgeInsets.only(top: 12),
+                          child: RecordingAudioPlayer(
+                            key: ValueKey('player-${selected.id}'),
+                            controller: _audioPlayerController,
+                            accessToken:
+                                widget.authController.accessToken ?? '',
+                            recordingId: selected.id,
+                            compact: true,
+                            showHeader: false,
+                            framed: false,
+                          ),
+                        )
+                      : const SizedBox.shrink(),
                 ),
               ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildWorkspaceTabContent(
+    RecordingModel selected, {
+    required bool isWide,
+  }) {
+    final content = switch (_workspaceTab) {
+      _WorkspaceTab.summary => _buildWorkspaceSummaryTab(selected),
+      _WorkspaceTab.transcript => _buildWorkspaceTranscriptTab(),
+      _WorkspaceTab.mindmap => _buildWorkspaceMindmapTab(),
+      _WorkspaceTab.chat => _buildWorkspaceChatTab(selected),
+    };
+
+    return Container(
+      key: ValueKey('workspace-tab-${_workspaceTab.name}-${selected.id}'),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F131A),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: const Color(0xFF323A46).withValues(alpha: 0.48),
+          width: 0.8,
+        ),
+      ),
+      child: Padding(
+        padding: EdgeInsets.all(isWide ? 18 : 14),
+        child: content,
+      ),
+    );
+  }
+
+  Widget _buildWorkspaceSummaryTab(RecordingModel selected) {
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          if (_recordingsController.latestJob != null)
+            _buildWorkspaceInfoBlock(
+              title: 'Status do processamento',
+              child: _buildJobCard(_recordingsController.latestJob!),
+            ),
+          if (_recordingsController.latestJob != null)
+            const SizedBox(height: 18),
+          _buildWorkspaceInfoBlock(
+            title: 'Resumo',
+            child: AppMarkdown(
+              data: _recordingsController.summary?.contentMd ??
+                  'Ainda sem resumo. Rode o processamento para gerar.',
+              dark: true,
+            ),
+          ),
+          const SizedBox(height: 18),
+          _buildLiveRecordingSection(selected),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWorkspaceTranscriptTab() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        const Text(
+          'Transcricao com timestamps',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Expanded(
+          child: _buildTranscriptSection(fillAvailable: true),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildWorkspaceMindmapTab() {
+    return SingleChildScrollView(
+      child: _buildWorkspaceInfoBlock(
+        title: 'Mapa mental',
+        child: MindmapViewer(
+          key: ValueKey(_recordingsController.mindmap?.id),
+          artifact: _recordingsController.mindmap,
+          transcript: _recordingsController.transcript,
+          transcriptSegments: _recordingsController.transcriptSegments,
+          emptyMessage:
+              'Ainda sem mapa mental. Rode o processamento para gerar.',
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWorkspaceChatTab(RecordingModel selected) {
+    return _buildChatSection(selected, fillAvailable: true);
+  }
+
+  Widget _buildWorkspaceInfoBlock({
+    required String title,
+    required Widget child,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF141922),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: const Color(0xFF3A4250).withValues(alpha: 0.48),
+          width: 0.8,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            title,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 10),
+          child,
+        ],
       ),
     );
   }
@@ -3198,11 +3829,12 @@ class _DashboardPageState extends State<DashboardPage> {
                   ),
                 ),
                 OutlinedButton.icon(
-                  onPressed: (_isLiveRecording || _pendingRecordedAudio != null) &&
-                          !_isLiveRecordingBusy &&
-                          !_isUploadingRecordedAudio
-                      ? _discardLiveRecording
-                      : null,
+                  onPressed:
+                      (_isLiveRecording || _pendingRecordedAudio != null) &&
+                              !_isLiveRecordingBusy &&
+                              !_isUploadingRecordedAudio
+                          ? _discardLiveRecording
+                          : null,
                   icon: const Icon(Icons.delete_sweep_outlined),
                   label: const Text('Descartar'),
                 ),
@@ -3237,7 +3869,9 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  Widget _buildTranscriptSection() {
+  Widget _buildTranscriptSection({
+    bool fillAvailable = false,
+  }) {
     final transcript = _recordingsController.transcript;
     final segments = _recordingsController.transcriptSegments;
 
@@ -3248,7 +3882,9 @@ class _DashboardPageState extends State<DashboardPage> {
     }
 
     if (segments.isEmpty) {
-      return SelectableText(transcript?.fullText ?? '');
+      return SingleChildScrollView(
+        child: SelectableText(transcript?.fullText ?? ''),
+      );
     }
 
     return AnimatedBuilder(
@@ -3270,34 +3906,64 @@ class _DashboardPageState extends State<DashboardPage> {
                   ),
             ),
             const SizedBox(height: 12),
-            Container(
-              constraints: const BoxConstraints(maxHeight: 420),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF8FAFC),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFFE4E7EC)),
+            if (fillAvailable)
+              Expanded(
+                child: _buildTranscriptSegmentsList(
+                  segments: segments,
+                  currentPositionMs: currentPositionMs,
+                  canSync: canSync,
+                ),
+              )
+            else
+              _buildTranscriptSegmentsList(
+                segments: segments,
+                currentPositionMs: currentPositionMs,
+                canSync: canSync,
+                maxHeight: 420,
               ),
-              child: ListView.separated(
-                controller: _transcriptScrollController,
-                padding: const EdgeInsets.all(12),
-                shrinkWrap: true,
-                itemCount: segments.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 10),
-                itemBuilder: (context, index) {
-                  final segment = segments[index];
-                  final isActive = currentPositionMs >= segment.startMs &&
-                      currentPositionMs <= segment.endMs;
-                  return _buildTranscriptSegmentCard(
-                    segment: segment,
-                    isActive: isActive,
-                    canSync: canSync,
-                  );
-                },
-              ),
-            ),
           ],
         );
       },
+    );
+  }
+
+  Widget _buildTranscriptSegmentsList({
+    required List<TranscriptSegmentModel> segments,
+    required int currentPositionMs,
+    required bool canSync,
+    double? maxHeight,
+  }) {
+    final list = Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE4E7EC)),
+      ),
+      child: ListView.separated(
+        controller: _transcriptScrollController,
+        padding: const EdgeInsets.all(12),
+        itemCount: segments.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (context, index) {
+          final segment = segments[index];
+          final isActive = currentPositionMs >= segment.startMs &&
+              currentPositionMs <= segment.endMs;
+          return _buildTranscriptSegmentCard(
+            segment: segment,
+            isActive: isActive,
+            canSync: canSync,
+          );
+        },
+      ),
+    );
+
+    if (maxHeight == null) {
+      return list;
+    }
+
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: maxHeight),
+      child: list,
     );
   }
 
@@ -3416,7 +4082,160 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  Widget _buildChatSection(RecordingModel selected) {
+  Widget _buildChatSection(
+    RecordingModel selected, {
+    bool fillAvailable = false,
+  }) {
+    final chatContainer = Container(
+      width: double.infinity,
+      height: fillAvailable ? null : 380,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: <Color>[
+            Color(0xFF111317),
+            Color(0xFF171A1F),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        border: Border.all(color: const Color(0xFF242932)),
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: const <BoxShadow>[
+          BoxShadow(
+            color: Color(0x22000000),
+            blurRadius: 24,
+            offset: Offset(0, 12),
+          ),
+        ],
+      ),
+      child: _chatController.isLoading
+          ? const Center(
+              child: CircularProgressIndicator(color: Colors.white),
+            )
+          : _chatController.messages.isEmpty
+              ? const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Text(
+                      'Ainda nao ha mensagens. Pergunte algo sobre a gravacao depois que a transcricao estiver pronta.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Color(0xFFB3BBC7),
+                        height: 1.5,
+                      ),
+                    ),
+                  ),
+                )
+              : ListView.separated(
+                  controller: _chatScrollController,
+                  padding: const EdgeInsets.all(12),
+                  itemCount: _chatController.messages.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 10),
+                  itemBuilder: (context, index) {
+                    return _buildChatBubble(_chatController.messages[index]);
+                  },
+                ),
+    );
+
+    final chatComposer = Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: <Widget>[
+        Expanded(
+          child: TextField(
+            controller: _chatInputController,
+            minLines: 1,
+            maxLines: 4,
+            decoration: InputDecoration(
+              labelText: 'Pergunte sobre esta gravacao',
+              labelStyle: const TextStyle(color: Color(0xFF7A8492)),
+              filled: true,
+              fillColor: const Color(0xFF15181D),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18),
+                borderSide: const BorderSide(color: Color(0xFF2B313A)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18),
+                borderSide: const BorderSide(color: Color(0xFF2B313A)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18),
+                borderSide: const BorderSide(color: Color(0xFF377DFF)),
+              ),
+            ),
+            style: const TextStyle(color: Color(0xFFF3F6FB)),
+            onSubmitted: (_) => _sendChatMessage(),
+          ),
+        ),
+        const SizedBox(width: 10),
+        FilledButton.icon(
+          onPressed: _chatController.isSending ? null : _sendChatMessage,
+          icon: _chatController.isSending
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.send),
+          label: const Text('Enviar'),
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFF1B67F8),
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+            ),
+          ),
+        ),
+      ],
+    );
+
+    if (fillAvailable) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              const Expanded(
+                child: Text(
+                  'Chat da Gravacao',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Atualizar chat',
+                onPressed: _chatController.isLoading ? null : _refreshChat,
+                icon: const Icon(Icons.refresh, color: Colors.white),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Expanded(child: chatContainer),
+          if (_chatController.errorMessage != null &&
+              _chatController.errorMessage!.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 10),
+            Text(
+              _chatController.errorMessage!,
+              style: const TextStyle(color: Colors.redAccent),
+            ),
+          ],
+          const SizedBox(height: 12),
+          chatComposer,
+          const SizedBox(height: 8),
+          Text(
+            'Sessao: ${_chatController.session?.title ?? 'Chat principal'}',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: const Color(0xFF6A717C),
+                ),
+          ),
+        ],
+      );
+    }
+
     return ContentSection(
       title: 'Chat da Gravacao',
       actions: <Widget>[
@@ -3429,57 +4248,7 @@ class _DashboardPageState extends State<DashboardPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Container(
-            height: 380,
-            width: double.infinity,
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: <Color>[
-                  Color(0xFF111317),
-                  Color(0xFF171A1F),
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              border: Border.all(color: const Color(0xFF242932)),
-              borderRadius: BorderRadius.circular(24),
-              boxShadow: const <BoxShadow>[
-                BoxShadow(
-                  color: Color(0x22000000),
-                  blurRadius: 24,
-                  offset: Offset(0, 12),
-                ),
-              ],
-            ),
-            child: _chatController.isLoading
-                ? const Center(
-                    child: CircularProgressIndicator(color: Colors.white),
-                  )
-                : _chatController.messages.isEmpty
-                    ? const Center(
-                        child: Padding(
-                          padding: EdgeInsets.all(16),
-                          child: Text(
-                            'Ainda nao ha mensagens. Pergunte algo sobre a gravacao depois que a transcricao estiver pronta.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: Color(0xFFB3BBC7),
-                              height: 1.5,
-                            ),
-                          ),
-                        ),
-                      )
-                    : ListView.separated(
-                        controller: _chatScrollController,
-                        padding: const EdgeInsets.all(12),
-                        itemCount: _chatController.messages.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 10),
-                        itemBuilder: (context, index) {
-                          return _buildChatBubble(
-                              _chatController.messages[index]);
-                        },
-                      ),
-          ),
+          chatContainer,
           if (_chatController.errorMessage != null &&
               _chatController.errorMessage!.isNotEmpty) ...<Widget>[
             const SizedBox(height: 10),
@@ -3489,59 +4258,7 @@ class _DashboardPageState extends State<DashboardPage> {
             ),
           ],
           const SizedBox(height: 12),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: <Widget>[
-              Expanded(
-                child: TextField(
-                  controller: _chatInputController,
-                  minLines: 1,
-                  maxLines: 4,
-                  decoration: InputDecoration(
-                    labelText: 'Pergunte sobre esta gravacao',
-                    labelStyle: const TextStyle(color: Color(0xFF7A8492)),
-                    filled: true,
-                    fillColor: const Color(0xFF15181D),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(18),
-                      borderSide: const BorderSide(color: Color(0xFF2B313A)),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(18),
-                      borderSide: const BorderSide(color: Color(0xFF2B313A)),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(18),
-                      borderSide: const BorderSide(color: Color(0xFF377DFF)),
-                    ),
-                  ),
-                  style: const TextStyle(color: Color(0xFFF3F6FB)),
-                  onSubmitted: (_) => _sendChatMessage(),
-                ),
-              ),
-              const SizedBox(width: 10),
-              FilledButton.icon(
-                onPressed: _chatController.isSending ? null : _sendChatMessage,
-                icon: _chatController.isSending
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.send),
-                label: const Text('Enviar'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF1B67F8),
-                  foregroundColor: Colors.white,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                ),
-              ),
-            ],
-          ),
+          chatComposer,
           const SizedBox(height: 8),
           Text(
             'Sessao: ${_chatController.session?.title ?? 'Chat principal'}',
@@ -3724,7 +4441,13 @@ class _DashboardPageState extends State<DashboardPage> {
       subtitle.writeln('Erro: ${job.errorMessage!}');
     }
 
-    return SelectableText(subtitle.toString());
+    return SelectableText(
+      subtitle.toString(),
+      style: const TextStyle(
+        color: Color(0xFFE4E7EC),
+        height: 1.55,
+      ),
+    );
   }
 
   String? _citationText(Object? raw) {
@@ -3782,6 +4505,10 @@ class _DashboardPageState extends State<DashboardPage> {
 enum _QuickCreateMode { liveRecording, uploadFile }
 
 enum _RecordingAction { open, process, edit, delete }
+
+enum _WorkspaceOverflowAction { delete }
+
+enum _WorkspaceTab { summary, transcript, mindmap, chat }
 
 class _QuickCreateChoice {
   const _QuickCreateChoice({
