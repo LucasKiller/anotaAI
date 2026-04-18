@@ -2176,17 +2176,43 @@ class _DashboardPageState extends State<DashboardPage> {
           ],
         ),
         const SizedBox(height: 22),
-        SizedBox(
-          height: 52,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            children: <Widget>[
-              _buildFilterChip(label: 'Todos', value: 'all'),
-              _buildFilterChip(label: 'Prontas', value: 'ready'),
-              _buildFilterChip(label: 'Processando', value: 'processing'),
-              _buildFilterChip(label: 'Falhas', value: 'failed'),
-            ],
-          ),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final ultraCompact = constraints.maxWidth < 420;
+            final compact = constraints.maxWidth < 560;
+            final spacing = ultraCompact ? 6.0 : 10.0;
+            final chips = <Widget>[
+              _buildFilterChip(
+                label: 'Todos',
+                value: 'all',
+                compact: compact,
+              ),
+              _buildFilterChip(
+                label: ultraCompact ? 'Pront.' : 'Prontas',
+                value: 'ready',
+                compact: compact,
+              ),
+              _buildFilterChip(
+                label: compact ? 'Proc.' : 'Processando',
+                value: 'processing',
+                compact: compact,
+              ),
+              _buildFilterChip(
+                label: ultraCompact ? 'Falh.' : 'Falhas',
+                value: 'failed',
+                compact: compact,
+              ),
+            ];
+
+            return Row(
+              children: <Widget>[
+                for (var index = 0; index < chips.length; index++) ...<Widget>[
+                  if (index > 0) SizedBox(width: spacing),
+                  Expanded(child: chips[index]),
+                ],
+              ],
+            );
+          },
         ),
         const SizedBox(height: 18),
         Container(
@@ -2401,31 +2427,57 @@ class _DashboardPageState extends State<DashboardPage> {
   Widget _buildFilterChip({
     required String label,
     required String value,
+    bool compact = false,
   }) {
     final active = _recordingFilter == value;
-    return Padding(
-      padding: const EdgeInsets.only(right: 12),
-      child: GestureDetector(
-        onTap: () {
-          setState(() {
-            _recordingFilter = value;
-          });
-        },
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
-          decoration: BoxDecoration(
-            color: active ? Colors.white : const Color(0xFF151922),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: active ? Colors.white : const Color(0xFF252B34),
-            ),
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _recordingFilter = value;
+        });
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 10 : 18,
+          vertical: compact ? 11 : 12,
+        ),
+        decoration: BoxDecoration(
+          color: active ? null : const Color(0xFF151922),
+          gradient: active
+              ? const LinearGradient(
+                  colors: <Color>[
+                    Color(0xFF8A79FF),
+                    Color(0xFF5B7CFF),
+                  ],
+                )
+              : null,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: active
+                ? const Color(0xFF93A4FF).withValues(alpha: 0.8)
+                : const Color(0xFF252B34),
           ),
+          boxShadow: active
+              ? const <BoxShadow>[
+                  BoxShadow(
+                    color: Color(0x335B7CFF),
+                    blurRadius: 16,
+                    offset: Offset(0, 8),
+                  ),
+                ]
+              : const <BoxShadow>[],
+        ),
+        child: Center(
           child: Text(
             label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              color: active ? const Color(0xFF111318) : Colors.white,
+              color: Colors.white,
               fontWeight: FontWeight.w700,
+              fontSize: compact ? 14 : 16,
             ),
           ),
         ),
