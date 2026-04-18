@@ -120,10 +120,45 @@ class _DashboardPageState extends State<DashboardPage> {
       _isUploadingRecordedAudio ||
       _pendingRecordedAudio != null;
 
+  bool _liveRecordingAlreadyHasAudio(RecordingModel? recording) {
+    if (recording == null || recording.sourceType != 'live_recording') {
+      return false;
+    }
+
+    if (_isLiveRecording ||
+        _pendingRecordedAudio != null ||
+        _isUploadingRecordedAudio) {
+      return false;
+    }
+
+    if (recording.status != 'draft') {
+      return true;
+    }
+    if ((recording.durationMs ?? 0) > 0 || recording.processedAt != null) {
+      return true;
+    }
+    if (_recordingsController.transcript != null ||
+        _recordingsController.transcriptSegments.isNotEmpty ||
+        _recordingsController.summary != null ||
+        _recordingsController.mindmap != null ||
+        _recordingsController.latestJob != null) {
+      return true;
+    }
+
+    return false;
+  }
+
   Future<void> _startLiveRecording() async {
     if (!_isLiveRecordingSupported) {
       _showMessage(
         'Gravacao ao vivo disponivel apenas em navegadores com suporte a microfone.',
+      );
+      return;
+    }
+    final selected = _recordingsController.selected;
+    if (_liveRecordingAlreadyHasAudio(selected)) {
+      _showMessage(
+        'Esta gravacao ja possui audio. Crie uma nova gravacao para gravar novamente.',
       );
       return;
     }
@@ -1776,8 +1811,12 @@ class _DashboardPageState extends State<DashboardPage> {
     return Container(
       key: ValueKey('workspace-${selected.id}'),
       decoration: BoxDecoration(
-        color: const Color(0xFFF2F4F7),
+        color: const Color(0xFF0E1219),
         borderRadius: BorderRadius.circular(36),
+        border: Border.all(
+          color: const Color(0xFF222936).withValues(alpha: 0.42),
+          width: 0.8,
+        ),
         boxShadow: const <BoxShadow>[
           BoxShadow(
             color: Color(0x29000000),
@@ -1789,7 +1828,7 @@ class _DashboardPageState extends State<DashboardPage> {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(36),
         child: Padding(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(6),
           child: _buildDetailPanel(selected),
         ),
       ),
@@ -2946,7 +2985,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final isWide = constraints.maxWidth >= 920;
+        final isWide = constraints.maxWidth >= 700;
 
         return Container(
           decoration: BoxDecoration(
@@ -2966,7 +3005,11 @@ class _DashboardPageState extends State<DashboardPage> {
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      _buildWorkspaceHeader(selected, isWide: isWide),
+                      _buildWorkspaceHeader(
+                        selected,
+                        isWide: isWide,
+                        panelWidth: constraints.maxWidth,
+                      ),
                       SizedBox(height: isWide ? 14 : 12),
                       _buildWorkspaceTabBar(),
                       const SizedBox(height: 12),
@@ -3031,6 +3074,7 @@ class _DashboardPageState extends State<DashboardPage> {
   Widget _buildWorkspaceHeader(
     RecordingModel selected, {
     required bool isWide,
+    required double panelWidth,
   }) {
     final metaCards = <Widget>[
       _buildWorkspaceMetaPill(
@@ -3059,30 +3103,43 @@ class _DashboardPageState extends State<DashboardPage> {
           label: selected.language!,
         ),
     ];
-    final actionBar = _buildWorkspaceActionBar(isWide: isWide);
+    final compactActions = panelWidth < 980;
+    final veryCompactActions = panelWidth < 620;
+    final actionBar = _buildWorkspaceActionBar(
+      compact: compactActions,
+      veryCompact: veryCompactActions,
+    );
 
     if (isWide) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Expanded(
-                child: _buildWorkspaceIdentity(
-                  selected,
-                  isWide: true,
-                ),
-              ),
-              const SizedBox(width: 16),
-              actionBar,
-            ],
+          _buildWorkspaceIdentity(
+            selected,
+            isWide: true,
           ),
           const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: metaCards,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: <Widget>[
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: <Widget>[
+                      ...metaCards.map(
+                        (card) => Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: card,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              actionBar,
+            ],
           ),
         ],
       );
@@ -3093,13 +3150,28 @@ class _DashboardPageState extends State<DashboardPage> {
       children: <Widget>[
         _buildWorkspaceIdentity(selected, isWide: false),
         const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: metaCards,
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: <Widget>[
+            Expanded(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: <Widget>[
+                    ...metaCards.map(
+                      (card) => Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: card,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            actionBar,
+          ],
         ),
-        const SizedBox(height: 12),
-        actionBar,
       ],
     );
   }
@@ -3200,83 +3272,149 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Widget _buildWorkspaceActionBar({
-    required bool isWide,
+    required bool compact,
+    required bool veryCompact,
   }) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      alignment: isWide ? WrapAlignment.end : WrapAlignment.start,
-      children: <Widget>[
+    final items = <Widget>[
+      if (!veryCompact)
         _buildWorkspaceActionIconButton(
           icon: Icons.edit_outlined,
           tooltip: 'Editar gravacao',
           onTap: _isLiveRecordingLocked ? null : _editSelectedRecording,
         ),
+      if (!veryCompact)
         _buildWorkspaceActionIconButton(
           icon: Icons.upload_file_rounded,
           tooltip: 'Enviar audio',
           onTap: _isLiveRecordingLocked ? null : _uploadAudio,
         ),
-        _buildWorkspaceActionIconButton(
-          icon: Icons.play_arrow_rounded,
-          tooltip: 'Processar gravacao',
-          emphasized: true,
-          onTap: _isLiveRecordingLocked ? null : _processRecording,
-        ),
+      _buildWorkspaceActionIconButton(
+        icon: Icons.play_arrow_rounded,
+        tooltip: 'Processar gravacao',
+        emphasized: true,
+        onTap: _isLiveRecordingLocked ? null : _processRecording,
+      ),
+      if (!compact && !veryCompact)
         _buildWorkspaceActionIconButton(
           icon: Icons.refresh_rounded,
           tooltip: 'Atualizar dados',
           onTap: _isLiveRecordingLocked ? null : _refreshDetails,
         ),
-        PopupMenuButton<_WorkspaceOverflowAction>(
-          tooltip: 'Mais acoes',
-          enabled: !_isLiveRecordingLocked,
-          color: const Color(0xFF171C24),
-          surfaceTintColor: Colors.transparent,
-          onSelected: (action) {
-            switch (action) {
-              case _WorkspaceOverflowAction.delete:
-                _deleteSelectedRecording();
-            }
-          },
-          itemBuilder: (context) =>
-              const <PopupMenuEntry<_WorkspaceOverflowAction>>[
-            PopupMenuItem<_WorkspaceOverflowAction>(
-              value: _WorkspaceOverflowAction.delete,
-              child: Row(
-                children: <Widget>[
-                  Icon(Icons.delete_outline_rounded, color: Color(0xFFFF9A91)),
-                  SizedBox(width: 10),
-                  Text(
-                    'Excluir',
-                    style: TextStyle(color: Color(0xFFFF9A91)),
-                  ),
-                ],
-              ),
-            ),
-          ],
-          child: Opacity(
-            opacity: _isLiveRecordingLocked ? 0.42 : 1,
-            child: Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: const Color(0xFF171C24),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: const Color(0xFF282F39).withValues(alpha: 0.55),
-                  width: 0.8,
+      _buildWorkspaceOverflowButton(
+        veryCompact: veryCompact,
+        includeRefresh: compact || veryCompact,
+      ),
+    ];
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        for (var index = 0; index < items.length; index++) ...<Widget>[
+          if (index > 0) const SizedBox(width: 8),
+          items[index],
+        ],
+      ],
+    );
+  }
+
+  Widget _buildWorkspaceOverflowButton({
+    required bool veryCompact,
+    required bool includeRefresh,
+  }) {
+    return PopupMenuButton<_WorkspaceOverflowAction>(
+      tooltip: 'Mais acoes',
+      enabled: !_isLiveRecordingLocked,
+      color: const Color(0xFF171C24),
+      surfaceTintColor: Colors.transparent,
+      onSelected: (action) {
+        switch (action) {
+          case _WorkspaceOverflowAction.edit:
+            _editSelectedRecording();
+          case _WorkspaceOverflowAction.upload:
+            _uploadAudio();
+          case _WorkspaceOverflowAction.refresh:
+            _refreshDetails();
+          case _WorkspaceOverflowAction.delete:
+            _deleteSelectedRecording();
+        }
+      },
+      itemBuilder: (context) => <PopupMenuEntry<_WorkspaceOverflowAction>>[
+        if (veryCompact)
+          const PopupMenuItem<_WorkspaceOverflowAction>(
+            value: _WorkspaceOverflowAction.edit,
+            child: Row(
+              children: <Widget>[
+                Icon(Icons.edit_outlined, color: Colors.white),
+                SizedBox(width: 10),
+                Text(
+                  'Editar',
+                  style: TextStyle(color: Colors.white),
                 ),
-              ),
-              child: const Icon(
-                Icons.more_horiz_rounded,
-                color: Colors.white,
-                size: 19,
-              ),
+              ],
             ),
+          ),
+        if (veryCompact)
+          const PopupMenuItem<_WorkspaceOverflowAction>(
+            value: _WorkspaceOverflowAction.upload,
+            child: Row(
+              children: <Widget>[
+                Icon(Icons.upload_file_rounded, color: Colors.white),
+                SizedBox(width: 10),
+                Text(
+                  'Enviar audio',
+                  style: TextStyle(color: Colors.white),
+                ),
+              ],
+            ),
+          ),
+        if (includeRefresh)
+          const PopupMenuItem<_WorkspaceOverflowAction>(
+            value: _WorkspaceOverflowAction.refresh,
+            child: Row(
+              children: <Widget>[
+                Icon(Icons.refresh_rounded, color: Colors.white),
+                SizedBox(width: 10),
+                Text(
+                  'Atualizar',
+                  style: TextStyle(color: Colors.white),
+                ),
+              ],
+            ),
+          ),
+        const PopupMenuItem<_WorkspaceOverflowAction>(
+          value: _WorkspaceOverflowAction.delete,
+          child: Row(
+            children: <Widget>[
+              Icon(Icons.delete_outline_rounded, color: Color(0xFFFF9A91)),
+              SizedBox(width: 10),
+              Text(
+                'Excluir',
+                style: TextStyle(color: Color(0xFFFF9A91)),
+              ),
+            ],
           ),
         ),
       ],
+      child: Opacity(
+        opacity: _isLiveRecordingLocked ? 0.42 : 1,
+        child: Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            color: const Color(0xFF171C24),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: const Color(0xFF282F39).withValues(alpha: 0.55),
+              width: 0.8,
+            ),
+          ),
+          child: const Icon(
+            Icons.more_horiz_rounded,
+            color: Colors.white,
+            size: 19,
+          ),
+        ),
+      ),
     );
   }
 
@@ -3589,29 +3727,55 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Widget _buildWorkspaceSummaryTab(RecordingModel selected) {
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          if (_recordingsController.latestJob != null)
-            _buildWorkspaceInfoBlock(
-              title: 'Status do processamento',
-              child: _buildJobCard(_recordingsController.latestJob!),
+    final summaryText = _recordingsController.summary?.contentMd ??
+        'Ainda sem resumo. Rode o processamento para gerar.';
+    final showLiveControls = _isLiveRecording ||
+        _isLiveRecordingBusy ||
+        _pendingRecordedAudio != null ||
+        _isUploadingRecordedAudio;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        const Text(
+          'Resumo',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Expanded(
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF141922),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: const Color(0xFF3A4250).withValues(alpha: 0.48),
+                width: 0.8,
+              ),
             ),
-          if (_recordingsController.latestJob != null)
-            const SizedBox(height: 18),
-          _buildWorkspaceInfoBlock(
-            title: 'Resumo',
-            child: AppMarkdown(
-              data: _recordingsController.summary?.contentMd ??
-                  'Ainda sem resumo. Rode o processamento para gerar.',
-              dark: true,
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  AppMarkdown(
+                    data: summaryText,
+                    dark: true,
+                  ),
+                  if (showLiveControls) ...<Widget>[
+                    const SizedBox(height: 16),
+                    _buildLiveRecordingSection(selected),
+                  ],
+                ],
+              ),
             ),
           ),
-          const SizedBox(height: 18),
-          _buildLiveRecordingSection(selected),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -3689,6 +3853,7 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Widget _buildLiveRecordingSection(RecordingModel selected) {
+    final alreadyRecorded = _liveRecordingAlreadyHasAudio(selected);
     final statusLabel = _isUploadingRecordedAudio
         ? 'Enviando e processando'
         : _pendingRecordedAudio != null
@@ -3711,9 +3876,11 @@ class _DashboardPageState extends State<DashboardPage> {
 
     final liveHint = _pendingRecordedAudio != null
         ? 'O audio gravado ficou pronto. Você pode reenviar ou descartar.'
-        : _isLiveRecording
-            ? 'Ao finalizar, o upload e o processamento serao disparados automaticamente para esta gravacao.'
-            : 'Grave direto do navegador, pause se precisar e finalize quando quiser subir o audio gravado.';
+        : alreadyRecorded
+            ? 'Esta gravacao ja tem audio enviado/processado. Para uma nova captura, crie outra gravacao.'
+            : _isLiveRecording
+                ? 'Ao finalizar, o upload e o processamento serao disparados automaticamente para esta gravacao.'
+                : 'Grave direto do navegador, pause se precisar e finalize quando quiser subir o audio gravado.';
 
     return ContentSection(
       title: 'Gravacao Ao Vivo',
@@ -3786,6 +3953,7 @@ class _DashboardPageState extends State<DashboardPage> {
               children: <Widget>[
                 FilledButton.icon(
                   onPressed: !_isLiveRecordingSupported ||
+                          alreadyRecorded ||
                           _isLiveRecording ||
                           _isLiveRecordingBusy ||
                           _isUploadingRecordedAudio ||
@@ -3795,7 +3963,9 @@ class _DashboardPageState extends State<DashboardPage> {
                   icon: const Icon(Icons.mic),
                   label: const Text('Iniciar gravacao'),
                   style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFFB42318),
+                    backgroundColor: alreadyRecorded
+                        ? const Color(0xFF7A5A00)
+                        : const Color(0xFFB42318),
                     foregroundColor: Colors.white,
                   ),
                 ),
@@ -4424,6 +4594,7 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
+  // ignore: unused_element
   Widget _buildJobCard(JobModel job) {
     final subtitle = StringBuffer()
       ..writeln('Status: ${job.status}')
@@ -4506,7 +4677,7 @@ enum _QuickCreateMode { liveRecording, uploadFile }
 
 enum _RecordingAction { open, process, edit, delete }
 
-enum _WorkspaceOverflowAction { delete }
+enum _WorkspaceOverflowAction { edit, upload, refresh, delete }
 
 enum _WorkspaceTab { summary, transcript, mindmap, chat }
 
