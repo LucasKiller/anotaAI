@@ -54,6 +54,7 @@ class _DashboardPageState extends State<DashboardPage> {
   _WorkspaceTab _workspaceTab = _WorkspaceTab.summary;
   int _workspaceTabDirection = 1;
   bool _workspacePlayerExpanded = false;
+  bool _workspaceContentFocusMode = false;
 
   @override
   void initState() {
@@ -480,6 +481,7 @@ class _DashboardPageState extends State<DashboardPage> {
           _workspaceTab = _WorkspaceTab.summary;
           _workspaceTabDirection = 1;
           _workspacePlayerExpanded = false;
+          _workspaceContentFocusMode = false;
         });
       }
       await _chatController.loadForRecording(
@@ -1601,6 +1603,10 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Widget _buildDesktopDashboardShell() {
+    final focusWorkspace = _workspaceContentFocusMode &&
+        _currentTabIndex == 0 &&
+        _recordingsController.selected != null;
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(28, 22, 28, 22),
       child: Center(
@@ -1608,31 +1614,33 @@ class _DashboardPageState extends State<DashboardPage> {
           constraints: const BoxConstraints(maxWidth: 1500),
           child: SizedBox(
             height: double.infinity,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                SizedBox(
-                  width: 112,
-                  child: _buildDesktopNavigationRail(),
-                ),
-                const SizedBox(width: 24),
-                SizedBox(
-                  width: 440,
-                  child: _buildDesktopMainPanel(),
-                ),
-                const SizedBox(width: 24),
-                Expanded(
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 240),
-                    switchInCurve: Curves.easeOutCubic,
-                    switchOutCurve: Curves.easeInCubic,
-                    child: _currentTabIndex == 0
-                        ? _buildDesktopWorkspacePanel()
-                        : _buildDesktopProfileAside(),
+            child: focusWorkspace
+                ? _buildDesktopWorkspacePanel()
+                : Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      SizedBox(
+                        width: 112,
+                        child: _buildDesktopNavigationRail(),
+                      ),
+                      const SizedBox(width: 24),
+                      SizedBox(
+                        width: 440,
+                        child: _buildDesktopMainPanel(),
+                      ),
+                      const SizedBox(width: 24),
+                      Expanded(
+                        child: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 240),
+                          switchInCurve: Curves.easeOutCubic,
+                          switchOutCurve: Curves.easeInCubic,
+                          child: _currentTabIndex == 0
+                              ? _buildDesktopWorkspacePanel()
+                              : _buildDesktopProfileAside(),
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-              ],
-            ),
           ),
         ),
       ),
@@ -1743,6 +1751,9 @@ class _DashboardPageState extends State<DashboardPage> {
       onTap: () {
         setState(() {
           _currentTabIndex = index;
+          if (index != 0) {
+            _workspaceContentFocusMode = false;
+          }
         });
       },
       child: AnimatedContainer(
@@ -2989,6 +3000,9 @@ class _DashboardPageState extends State<DashboardPage> {
       onTap: () {
         setState(() {
           _currentTabIndex = index;
+          if (index != 0) {
+            _workspaceContentFocusMode = false;
+          }
         });
       },
       child: Padding(
@@ -3038,6 +3052,7 @@ class _DashboardPageState extends State<DashboardPage> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final isWide = constraints.maxWidth >= 700;
+        final focusMode = _workspaceContentFocusMode;
 
         return Container(
           decoration: BoxDecoration(
@@ -3049,7 +3064,9 @@ class _DashboardPageState extends State<DashboardPage> {
             ),
           ),
           child: Padding(
-            padding: EdgeInsets.all(isWide ? 20 : 14),
+            padding: EdgeInsets.all(
+              focusMode ? (isWide ? 14 : 10) : (isWide ? 20 : 14),
+            ),
             child: _recordingsController.isDetailLoading
                 ? const Center(
                     child: CircularProgressIndicator(color: Colors.white),
@@ -3057,16 +3074,20 @@ class _DashboardPageState extends State<DashboardPage> {
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      _buildWorkspaceHeader(
-                        selected,
-                        isWide: isWide,
-                        panelWidth: constraints.maxWidth,
-                      ),
-                      SizedBox(height: isWide ? 14 : 12),
-                      _buildWorkspaceTabBar(),
-                      const SizedBox(height: 12),
-                      _buildWorkspacePlayerCard(selected),
-                      const SizedBox(height: 12),
+                      if (!focusMode) ...<Widget>[
+                        _buildWorkspaceHeader(
+                          selected,
+                          isWide: isWide,
+                          panelWidth: constraints.maxWidth,
+                        ),
+                        SizedBox(height: isWide ? 14 : 12),
+                      ],
+                      _buildWorkspaceTabToolbar(isWide: isWide),
+                      SizedBox(height: focusMode ? 8 : 12),
+                      if (!focusMode) ...<Widget>[
+                        _buildWorkspacePlayerCard(selected),
+                        const SizedBox(height: 12),
+                      ],
                       Expanded(
                         child: ClipRect(
                           child: AnimatedSwitcher(
@@ -3111,6 +3132,7 @@ class _DashboardPageState extends State<DashboardPage> {
                             child: _buildWorkspaceTabContent(
                               selected,
                               isWide: isWide,
+                              focusMode: focusMode,
                             ),
                           ),
                         ),
@@ -3528,6 +3550,56 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
+  Widget _buildWorkspaceTabToolbar({
+    required bool isWide,
+  }) {
+    final focusMode = _workspaceContentFocusMode;
+    return Row(
+      children: <Widget>[
+        Expanded(child: _buildWorkspaceTabBar()),
+        const SizedBox(width: 8),
+        Tooltip(
+          message: focusMode
+              ? 'Recolher foco do conteudo'
+              : 'Expandir foco do conteudo',
+          child: InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: _toggleWorkspaceContentFocusMode,
+            child: Ink(
+              height: isWide ? 42 : 40,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: focusMode
+                    ? const Color(0xFF1B2533)
+                    : const Color(0xFF151922),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: focusMode
+                      ? const Color(0xFF5B7CFF).withValues(alpha: 0.72)
+                      : const Color(0xFF3A4250).withValues(alpha: 0.5),
+                  width: 0.8,
+                ),
+              ),
+              child: Icon(
+                focusMode
+                    ? Icons.keyboard_double_arrow_down_rounded
+                    : Icons.keyboard_double_arrow_up_rounded,
+                color: Colors.white,
+                size: 20,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _toggleWorkspaceContentFocusMode() {
+    setState(() {
+      _workspaceContentFocusMode = !_workspaceContentFocusMode;
+    });
+  }
+
   Widget _buildWorkspaceTabButton(_WorkspaceTab tab) {
     final active = _workspaceTab == tab;
     final currentIndex = _WorkspaceTab.values.indexOf(_workspaceTab);
@@ -3753,6 +3825,7 @@ class _DashboardPageState extends State<DashboardPage> {
   Widget _buildWorkspaceTabContent(
     RecordingModel selected, {
     required bool isWide,
+    required bool focusMode,
   }) {
     final content = switch (_workspaceTab) {
       _WorkspaceTab.summary => _buildWorkspaceSummaryTab(selected),
@@ -3765,14 +3838,16 @@ class _DashboardPageState extends State<DashboardPage> {
       key: ValueKey('workspace-tab-${_workspaceTab.name}-${selected.id}'),
       decoration: BoxDecoration(
         color: const Color(0xFF0F131A),
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(focusMode ? 20 : 24),
         border: Border.all(
           color: const Color(0xFF323A46).withValues(alpha: 0.48),
           width: 0.8,
         ),
       ),
       child: Padding(
-        padding: EdgeInsets.all(isWide ? 18 : 14),
+        padding: EdgeInsets.all(
+          focusMode ? (isWide ? 12 : 10) : (isWide ? 18 : 14),
+        ),
         child: content,
       ),
     );
