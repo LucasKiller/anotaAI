@@ -13,6 +13,8 @@ settings = get_settings()
 
 _SUMMARY_CHUNK_CHARS = 5_500
 _MINDMAP_CONTEXT_CHARS = 8_000
+_SUMMARY_PARTIAL_OUTPUT_TOKENS = 1_000
+_SUMMARY_FINAL_OUTPUT_TOKENS = 2_600
 
 
 @dataclass
@@ -57,16 +59,20 @@ def build_summary_markdown(
             partial = client.create_response(
                 input_text=chunk,
                 instructions=_chunk_summary_instructions(title=title, chunk_index=index, total_chunks=len(chunk_contexts)),
-                max_output_tokens=500,
+                max_output_tokens=_SUMMARY_PARTIAL_OUTPUT_TOKENS,
                 temperature=0.2,
             )
             partial_summaries.append(partial.text.strip())
             model_name = partial.model
 
         final = client.create_response(
-            input_text=_final_summary_input(title=title, partial_summaries=partial_summaries),
+            input_text=_final_summary_input(
+                title=title,
+                partial_summaries=partial_summaries,
+                segments=segments,
+            ),
             instructions=_final_summary_instructions(),
-            max_output_tokens=900,
+            max_output_tokens=_SUMMARY_FINAL_OUTPUT_TOKENS,
             temperature=0.2,
         )
         return GeneratedMarkdownArtifact(content=final.text.strip(), model_name=final.model or model_name)
@@ -162,40 +168,131 @@ def _build_chunk_contexts(full_text: str, segments: list[dict], *, max_chars: in
 
 def _chunk_summary_instructions(*, title: str, chunk_index: int, total_chunks: int) -> str:
     return (
-        "Voce esta resumindo uma transcricao de audio para o produto AnotaAi.\n"
+        "Voce e o mecanismo oficial de resumo do AnotaAi.\n"
         f"Titulo da gravacao: {title}.\n"
         f"Parte {chunk_index} de {total_chunks}.\n"
-        "Resuma somente o conteudo fornecido.\n"
-        "Nao invente fatos, pessoas, datas ou conclusoes ausentes.\n"
-        "Responda em Markdown com exatamente estas secoes:\n"
-        "## Topicos\n"
-        "Use de 3 a 6 bullets curtos.\n"
-        "## Detalhes\n"
-        "Use 1 paragrafo curto com contexto importante.\n"
-        "Mantenha a resposta objetiva."
+        "Sua tarefa e produzir um resumo parcial deste trecho para consolidacao posterior.\n"
+        "Regras obrigatorias:\n"
+        "- use apenas informacoes presentes no trecho recebido;\n"
+        "- nao invente fatos, nomes, datas, numeros, decisoes ou conclusoes;\n"
+        "- preserve o sentido real do que foi dito;\n"
+        "- se houver ambiguidade, transcricao ruim ou lacunas, sinalize;\n"
+        "- sempre que possivel, mantenha referencias de timestamp [mm:ss] ou [hh:mm:ss].\n"
+        "Retorne Markdown com exatamente estas secoes:\n"
+        "## Tema do trecho\n"
+        "## Topicos abordados\n"
+        "Use 4 a 10 bullets objetivos.\n"
+        "## Pontos-chave e evidencias\n"
+        "Liste fatos/conceitos com timestamp quando houver.\n"
+        "## Riscos de interpretacao\n"
+        "Aponte ambiguidades, ruido ou baixa confiabilidade, se existirem."
     )
 
 
-def _final_summary_input(*, title: str, partial_summaries: list[str]) -> str:
+def _final_summary_input(
+    *,
+    title: str,
+    partial_summaries: list[str],
+    segments: list[dict],
+) -> str:
     parts = [f"TITULO: {title}", "", "RESUMOS PARCIAIS:"]
     for index, item in enumerate(partial_summaries, start=1):
         parts.append(f"\n### Parte {index}\n{item.strip()}")
+    parts.extend(
+        [
+            "",
+            "TRECHOS DE APOIO COM TIMESTAMP (FONTE BRUTA):",
+            _timestamp_evidence(segments, max_items=36),
+        ]
+    )
     return "\n".join(parts).strip()
 
 
 def _final_summary_instructions() -> str:
     return (
-        "Consolide os resumos parciais de uma gravacao em um resumo final fiel ao conteudo.\n"
-        "Nao invente informacoes.\n"
-        "Retorne Markdown com exatamente estas secoes e titulos:\n"
-        "# Resumo\n"
-        "## Visao geral\n"
-        "## Pontos principais\n"
-        "## Perguntas e implicacoes\n"
-        "Em 'Pontos principais', use de 4 a 8 bullets claros.\n"
-        "Em 'Perguntas e implicacoes', cite duvidas abertas, acoes, decisoes ou consequencias quando existirem.\n"
-        "Se algo nao estiver claro no conteudo, sinalize a incerteza."
+        "Voce e o mecanismo oficial de resumo do AnotaAi.\n"
+        "Sua tarefa e analisar a transcricao e gerar um resumo util, confiavel, estruturado e facil de consultar.\n"
+        "Regras obrigatorias:\n"
+        "- use apenas as informacoes presentes no material fornecido;\n"
+        "- nao invente fatos, nomes, datas, numeros, decisoes ou conclusoes;\n"
+        "- preserve o sentido real do que foi dito;\n"
+        "- priorize clareza, organizacao e utilidade pratica;\n"
+        "- consolide repeticoes sem perder conteudo relevante;\n"
+        "- se houver varios assuntos, organize por blocos tematicos;\n"
+        "- sempre que possivel, associe pontos importantes a timestamps;\n"
+        "- se houver ambiguidade, incompletude ou baixa confiabilidade, sinalize explicitamente.\n"
+        "Detecte automaticamente se o conteudo se parece mais com aula, palestra, reuniao, entrevista ou conversa informal e adapte o foco.\n"
+        "Se uma secao nao tiver dados suficientes, escreva: Nao identificado na transcricao.\n"
+        "Retorne Markdown com exatamente os titulos abaixo, nesta ordem:\n"
+        "# Resumo Executivo\n"
+        "# Tema e Objetivo\n"
+        "# Principais Topicos\n"
+        "# Pontos-Chave\n"
+        "# Conclusoes\n"
+        "# Pendencias e Proximos Passos\n"
+        "# Duvidas e Pontos em Aberto\n"
+        "# Dados Relevantes Citados\n"
+        "# Trechos Importantes com Timestamp\n"
+        "# Resumo Detalhado\n"
+        "# Observacoes de Qualidade\n"
+        "Regras de preenchimento por secao:\n"
+        "- Em 'Resumo Executivo', escreva de 4 a 8 linhas.\n"
+        "- Em 'Tema e Objetivo', use bullets para tema principal e objetivo da gravacao.\n"
+        "- Em 'Principais Topicos', liste em ordem logica.\n"
+        "- Em 'Pontos-Chave', liste aprendizados, ideias centrais e decisoes quando houver.\n"
+        "- Em 'Pendencias e Proximos Passos', inclua somente o que estiver realmente presente.\n"
+        "- Em 'Dados Relevantes Citados', liste nomes, datas, numeros, ferramentas, referencias, valores e exemplos mencionados.\n"
+        "- Em 'Trechos Importantes com Timestamp', traga itens com timestamp e descricao curta.\n"
+        "- Em 'Resumo Detalhado', organize por blocos tematicos.\n"
+        "Regras adicionais por tipo de conteudo:\n"
+        "- Aula/palestra: destaque conceitos, definicoes, explicacoes, exemplos e pontos de revisao.\n"
+        "- Reuniao: destaque decisoes, responsaveis, prazos, riscos, bloqueios e proximos passos.\n"
+        "- Entrevista/conversa: destaque contexto, pontos de virada, opinioes relevantes, duvidas e encaminhamentos.\n"
+        "Nao use bloco de codigo no output."
     )
+
+
+def _timestamp_evidence(segments: list[dict], *, max_items: int) -> str:
+    if not segments:
+        return "- Sem segmentos com timestamp disponiveis."
+
+    total = len(segments)
+    selected_indexes: set[int] = set()
+    anchor_candidates = [0, total // 4, total // 2, (3 * total) // 4, total - 1]
+    for index in anchor_candidates:
+        if 0 <= index < total:
+            selected_indexes.add(index)
+
+    ranked_by_length = sorted(
+        range(total),
+        key=lambda index: len(str(segments[index].get("text", "")).strip()),
+        reverse=True,
+    )
+    for index in ranked_by_length:
+        selected_indexes.add(index)
+        if len(selected_indexes) >= max_items:
+            break
+
+    lines: list[str] = []
+    for index in sorted(selected_indexes)[:max_items]:
+        segment = segments[index]
+        text = " ".join(str(segment.get("text", "")).split()).strip()
+        if not text:
+            continue
+        if len(text) > 190:
+            text = f"{text[:187].rstrip()}..."
+        start_ms = _coerce_ms(segment.get("start_ms"))
+        end_ms = _coerce_ms(segment.get("end_ms"))
+        lines.append(f"- [{_format_ms(start_ms)}-{_format_ms(end_ms)}] {text}")
+
+    return "\n".join(lines) if lines else "- Sem segmentos com texto disponivel."
+
+
+def _coerce_ms(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _mindmap_context(*, title: str, summary_markdown: str, full_text: str, segments: list[dict]) -> str:
@@ -319,13 +416,35 @@ def _format_ms(value: int) -> str:
 
 
 def _stub_summary_markdown(title: str, full_text: str, segments: list[dict]) -> str:
-    bullets = "\n".join(f"- {segment['text']}" for segment in segments[:5])
+    bullets = "\n".join(f"- {segment['text']}" for segment in segments[:8])
+    timestamp_lines = "\n".join(
+        f"- [{_format_ms(_coerce_ms(segment.get('start_ms')))}-{_format_ms(_coerce_ms(segment.get('end_ms')))}] {segment.get('text', '')}"
+        for segment in segments[:6]
+    )
     return (
-        f"# Resumo: {title}\n\n"
-        "## Visao geral\n"
-        f"{full_text[:320]}...\n\n"
-        "## Pontos principais\n"
-        f"{bullets if bullets else '- Sem segmentos disponiveis.'}"
+        "# Resumo Executivo\n"
+        f"{(full_text[:540] + '...') if full_text else 'Nao identificado na transcricao.'}\n\n"
+        "# Tema e Objetivo\n"
+        f"- Tema principal: {title}\n"
+        "- Objetivo da gravacao: Nao identificado na transcricao.\n\n"
+        "# Principais Topicos\n"
+        f"{bullets if bullets else '- Nao identificado na transcricao.'}\n\n"
+        "# Pontos-Chave\n"
+        f"{bullets if bullets else '- Nao identificado na transcricao.'}\n\n"
+        "# Conclusoes\n"
+        "- Nao identificado na transcricao.\n\n"
+        "# Pendencias e Proximos Passos\n"
+        "- Nao identificado na transcricao.\n\n"
+        "# Duvidas e Pontos em Aberto\n"
+        "- Nao identificado na transcricao.\n\n"
+        "# Dados Relevantes Citados\n"
+        "- Nao identificado na transcricao.\n\n"
+        "# Trechos Importantes com Timestamp\n"
+        f"{timestamp_lines if timestamp_lines else '- Nao identificado na transcricao.'}\n\n"
+        "# Resumo Detalhado\n"
+        f"{(full_text[:1_400] + '...') if full_text else 'Nao identificado na transcricao.'}\n\n"
+        "# Observacoes de Qualidade\n"
+        "- Resumo em modo fallback (sem provedor de IA configurado)."
     )
 
 
